@@ -1,0 +1,87 @@
+// Application state, as one Valtio proxy. Components read it with
+// `useSnapshot(store)`; only the functions in ./actions.ts mutate it.
+
+import { proxy } from "valtio";
+
+import type {
+  Applied,
+  Config,
+  Review,
+  RunInfo,
+  RunOptions,
+  UntriagedBug,
+  WhoAmI,
+} from "./api";
+
+export const DEFAULT_OPTIONS: RunOptions = {
+  model: null,
+  effort: null,
+  max_turns: null,
+  headless: false,
+  build: true,
+};
+
+/** The draft Bugzilla changes for the selected run, edited before posting. */
+export interface ActionsState {
+  bugId: string;
+  comment: string;
+  preview: boolean;
+  changes: string;
+  attachments: string[];
+  force: boolean;
+  busy: boolean;
+  error: string | null;
+  done: Applied | null;
+  whoami: WhoAmI | null;
+  whoamiError: string | null;
+}
+
+/** The selected run: its streamed output, then its result. */
+export interface RunState {
+  runId: string;
+  lines: string[];
+  info: RunInfo | null;
+  ended: boolean;
+  logOpen: boolean;
+  cancelError: string | null;
+  review: Review | null;
+  reviewError: string | null;
+  actions: ActionsState | null;
+}
+
+export type TriageStep = 1 | 2 | 3;
+
+export interface TriageState {
+  step: TriageStep;
+  bugs: UntriagedBug[];
+  selected: number[];
+  options: RunOptions;
+  busy: boolean;
+  error: string | null;
+}
+
+export interface StartState {
+  bugId: string;
+  bugData: string;
+  options: RunOptions;
+  busy: boolean;
+  error: string | null;
+}
+
+export const store = proxy({
+  config: null as Config | null,
+  configError: null as string | null,
+  runs: [] as RunInfo[],
+  start: {
+    bugId: "",
+    bugData: "",
+    options: { ...DEFAULT_OPTIONS },
+    busy: false,
+    error: null,
+  } as StartState,
+  run: null as RunState | null,
+  /** The untriaged-bugs dialog, while open. */
+  triage: null as TriageState | null,
+  /** Wall clock in ms, ticking while a run is in progress. */
+  now: Date.now(),
+});
