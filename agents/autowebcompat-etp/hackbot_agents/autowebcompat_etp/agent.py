@@ -32,6 +32,11 @@ from .exceptions import (
 )
 from .mcp_servers import build_firefox_devtools_server
 from .result import RESULT_SERVER_NAME, EtpInvestigationResult, ProposedShim
+from .tracker_lists import (
+    CHECK_TRACKER_LISTS_TOOL,
+    TRACKER_LISTS_SERVER_NAME,
+    build_tracker_lists_server,
+)
 
 HERE = Path(__file__).resolve().parent
 
@@ -85,6 +90,11 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
         )
         self.add_mcp_server(
             EXCEPTIONS_SERVER_NAME, build_exceptions_server(), [FIND_EXCEPTIONS_TOOL]
+        )
+        self.add_mcp_server(
+            TRACKER_LISTS_SERVER_NAME,
+            build_tracker_lists_server(),
+            [CHECK_TRACKER_LISTS_TOOL],
         )
         if self.input_data.type == "bug_id":
             self.add_mcp_server("bugzilla", bugzilla_mcp_server, BUGZILLA_READ_TOOLS)

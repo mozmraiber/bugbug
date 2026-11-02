@@ -43,7 +43,7 @@ DEVTOOLS_TOOLS = [
 ]
 
 # Privileged tools from the same server (--enable-privileged-context). The last
-# two are added to the server by mcp/patch-mcp.mjs. All of them run their
+# three are added to the server by mcp/patch-mcp.mjs. All of them run their
 # chrome code and switch back to the page, so they never leave the session in
 # the chrome context; select_privileged_context, which does, is left out on
 # purpose (and with it evaluate_privileged_script).
@@ -52,4 +52,5 @@ PRIVILEGED_TOOLS = [
     "mcp__firefox-devtools__set_firefox_prefs",
     "mcp__firefox-devtools__set_etp_mode",
     "mcp__firefox-devtools__get_content_blocking_log",
+    "mcp__firefox-devtools__wait_for_page_load",
 ]

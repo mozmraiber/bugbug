@@ -210,6 +210,7 @@ class EtpInvestigationResult(BaseModel):
         (
             Literal["not_etp"]
             | Literal["not_reproducible"]
+            | Literal["fixed_by_list_update"]
             | Literal["broken_in_standard"]
             | Literal["not_fixable_by_exception"]
             | Literal["exception_not_verified"]
@@ -228,6 +229,9 @@ class EtpInvestigationResult(BaseModel):
           tracking protection (e.g. a Firefox UI issue, or a webcompat issue that the
           report itself shows happens with default settings)
           * not_reproducible - You ran all the steps but the site works in Strict mode too
+          * fixed_by_list_update - The site works in Strict mode, and `check_tracker_lists`
+          shows that a host serving the broken feature was recently removed from the
+          tracker lists: the reporter's profile most likely still had the older lists
           * broken_in_standard - The breakage also happens in Standard mode, so it is not
           caused by Strict mode
           * not_fixable_by_exception - Strict mode causes the breakage, but through a

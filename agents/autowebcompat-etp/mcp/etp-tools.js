@@ -232,6 +232,88 @@ async function handleGetContentBlockingLog() {
   }
 }
 
+// navigate_page only waits for "interactive" (HTML parsed), before the
+// scripts, iframes and widgets a page needs have loaded. Waiting inside
+// evaluate_script instead fails: the bundle aborts every BiDi command after
+// 10s. So poll document.readyState with short, separate commands until the
+// load event, then give late scripts a moment. A page that never reaches
+// "complete" is reported, not treated as an error: being stuck loading can be
+// exactly the breakage under investigation.
+const ETP_PAGE_STATE_EXPRESSION =
+  "JSON.stringify({ readyState: document.readyState, url: location.href })";
+
+async function handleWaitForPageLoad(args2) {
+  try {
+    const { timeoutSeconds = 30, settleSeconds = 2 } = args2 || {};
+    const { getFirefox: getFirefox2 } = await Promise.resolve().then(
+      () => (init_src(), src_exports)
+    );
+    const firefox3 = await getFirefox2();
+    const started = Date.now();
+    const deadline = started + timeoutSeconds * 1e3;
+    let state = null;
+    for (;;) {
+      try {
+        const result = await firefox3.sendBiDiCommand("script.evaluate", {
+          expression: ETP_PAGE_STATE_EXPRESSION,
+          target: { context: firefox3.getCurrentContextId() },
+          awaitPromise: false,
+        });
+        if (result.type === "success") {
+          state = JSON.parse(result.result.value);
+        }
+      } catch {
+        // Mid-navigation the old document can go away under the command, and
+        // a busy page can time it out; keep polling until the deadline.
+      }
+      if (
+        (state && state.readyState === "complete") ||
+        Date.now() >= deadline
+      ) {
+        break;
+      }
+      await new Promise((resolve2) => setTimeout(resolve2, 500));
+    }
+    const waited = ((Date.now() - started) / 1e3).toFixed(1);
+    if (!state || state.readyState !== "complete") {
+      return successResponse(
+        `The page did not finish loading within ${timeoutSeconds}s: ` +
+          `readyState is ${state ? `"${state.readyState}"` : "unknown"}` +
+          (state ? ` at ${state.url}` : "") +
+          ". If the report says the page is stuck loading, this is the breakage."
+      );
+    }
+    await new Promise((resolve2) => setTimeout(resolve2, settleSeconds * 1e3));
+    return successResponse(
+      `The page finished loading after ${waited}s (${state.url}); waited ` +
+        `${settleSeconds}s more for late scripts.`
+    );
+  } catch (error2) {
+    return errorResponse(
+      error2 instanceof Error ? error2 : new Error(String(error2))
+    );
+  }
+}
+
+var waitForPageLoadTool = {
+  name: "wait_for_page_load",
+  description:
+    'Wait until the selected page has fully loaded (document.readyState is "complete"), then a little longer for late scripts. Call it after navigate_page and after clicks that load content, instead of waiting inside evaluate_script. Reports a page that never finishes loading instead of failing.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      timeoutSeconds: {
+        type: "number",
+        description: "How long to wait for the load (default 30)",
+      },
+      settleSeconds: {
+        type: "number",
+        description: "Extra wait after the load for late scripts (default 2)",
+      },
+    },
+  },
+};
+
 var setEtpModeTool = {
   name: "set_etp_mode",
   description:

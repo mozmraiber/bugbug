@@ -72,13 +72,15 @@ insert(
   '["get_firefox_prefs", handleGetFirefoxPrefs],',
   `
       ["set_etp_mode", handleSetEtpMode],
-      ["get_content_blocking_log", handleGetContentBlockingLog],`
+      ["get_content_blocking_log", handleGetContentBlockingLog],
+      ["wait_for_page_load", handleWaitForPageLoad],`
 );
 // Definitions, in the privileged block of the advertised tool list.
 insert(
   "getFirefoxPrefsTool,\n",
   `      setEtpModeTool,
       getContentBlockingLogTool,
+      waitForPageLoadTool,
 `
 );
 

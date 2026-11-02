@@ -39,6 +39,14 @@ Everything happens at runtime in one Firefox session; there is no restart.
 Pref changes only affect loads that start afterwards: after every change, load
 the page again with `navigate_page` before you follow the steps.
 
+`navigate_page` returns as soon as the HTML is parsed, before the page's scripts
+and widgets have loaded. After every `navigate_page`, and after clicks that load
+content, call `wait_for_page_load` before you look at the page. Don't wait
+inside `evaluate_script` (e.g. with `setTimeout`): page scripts that run longer
+than a few seconds fail with a timeout. If `wait_for_page_load` reports that the
+page never finished loading, that is an observation about the page, not a tool
+failure.
+
 ## Background
 
 **ETP modes.** `browser.contentblocking.category` is `standard` by default.
@@ -73,6 +81,14 @@ list. If one of those causes the breakage, report `not_fixable_by_exception`.
 **Exception categories.** Strict mode applies `baseline` exceptions by default;
 `convenience` exceptions only when the user opts in. An existing convenience
 exception therefore does not help a Strict user by default.
+
+**Tracker list changes.** Firefox's tracker lists are built from
+mozilla-services/shavar-prod-lists, and a profile only gets a change once it
+downloads the new lists. `check_tracker_lists` shows, for given hosts, the list
+entries covering them today and the commits of the last 180 days that added or
+removed them. A site that a recent removal fixed works in your fresh profile but
+is still broken for a reporter with older lists; a recent addition can be a list
+mistake to fix upstream.
 
 **Existing exceptions.** `find_etp_exceptions` looks up entries in the live
 exception list by resource host, top-level site and bug number. A
@@ -124,8 +140,14 @@ from the values it lists with `standard` are the ones Strict mode changes.
    prefs with the Standard ones.
    Load the URL again and follow the steps. If the site works, read the content
    blocking log, call `find_etp_exceptions` with the bug number and the hosts
-   the log shows as `STATE_LOADED_*`, and submit `not_reproducible`; say in the
-   summary which existing exception, if any, explains it. Otherwise take the
+   the log shows as `STATE_LOADED_*`. Then call `check_tracker_lists`, once,
+   with the base domains (e.g. `editmysite.com`) of every third-party host the
+   page loads, taken from `list_network_requests`, plus any hosts the report
+   names. The content blocking log is not enough here: it only shows hosts that
+   are on a list today, and a host that was recently removed isn't. If a recent commit removed a host that
+   serves the broken feature, submit `fixed_by_list_update` and name the commit
+   and date in the summary. Otherwise submit `not_reproducible` and say which
+   existing exception, if any, explains it. Otherwise take the
    Strict screenshot and read the content blocking log.
 
 4. **Attribute, only if the log doesn't.** If the content blocking log shows
@@ -165,8 +187,10 @@ from the values it lists with `standard` are the ones Strict mode changes.
    the table in "Background"). If nothing fixes it, submit
    `exception_not_verified`.
 
-6. **Choose the fix.** Call `find_etp_exceptions` with the hosts of your
-   verified set and the site. An existing exception for the same host and site
+6. **Choose the fix.** Call `find_etp_exceptions` and `check_tracker_lists`
+   with the hosts of your verified set (and the site, for the former). If a host
+   was only added to the lists recently, say so in the summary: it may be a list
+   mistake to report upstream rather than something to except. An existing exception for the same host and site
    that still leaves it broken is usually a `convenience` entry, which Strict
    mode doesn't apply by default: say so in the summary. Decide which
    `category` the exceptions would have (see the field descriptions).
