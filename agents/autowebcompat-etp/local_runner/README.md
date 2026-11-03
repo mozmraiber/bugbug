@@ -48,7 +48,7 @@ Run these from the repo root:
 ```sh
 pnpm --dir agents/autowebcompat-etp/local_runner/web install --frozen-lockfile
 pnpm --dir agents/autowebcompat-etp/local_runner/web build
-uv run agents/autowebcompat-etp/local_runner/server.py
+uv run --locked agents/autowebcompat-etp/local_runner/server.py
 ```
 
 Then open <http://127.0.0.1:8000>. The server serves the built UI from

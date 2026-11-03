@@ -11,7 +11,7 @@ are posted with your own Bugzilla API key.
 
     pnpm --dir agents/autowebcompat-etp/local_runner/web install --frozen-lockfile
     pnpm --dir agents/autowebcompat-etp/local_runner/web build
-    uv run agents/autowebcompat-etp/local_runner/server.py
+    uv run --locked agents/autowebcompat-etp/local_runner/server.py
 
 The server then serves the built React app from web/dist. To work on the UI,
 run `pnpm dev` in web/ as well and open the Vite dev server, which proxies
