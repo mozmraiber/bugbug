@@ -9,7 +9,7 @@ output to the browser, and once it is done renders the result next to a draft
 of the Bugzilla changes. After you have edited and approved them, the changes
 are posted with your own Bugzilla API key.
 
-    pnpm --dir agents/autowebcompat-etp/local_runner/web install
+    pnpm --dir agents/autowebcompat-etp/local_runner/web install --frozen-lockfile
     pnpm --dir agents/autowebcompat-etp/local_runner/web build
     uv run agents/autowebcompat-etp/local_runner/server.py
 
