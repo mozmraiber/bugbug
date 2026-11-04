@@ -13,6 +13,11 @@ a SmartBlock shim when an exception would only be a convenience fix.
   (a captcha, a "confirm you are a human" interstitial or an IP block). Do not
   wait for one to decay, retry to see whether it lifted, space requests out
   to avoid tripping it, or vary your request pattern to evade it.
+  An interstitial that finishes on its own without any interaction (a
+  proof-of-work or "checking your browser" page that reloads into the site) is
+  not a block: call `wait_for_page_load` again to give it time, up to about 30
+  seconds in total. Only if the site still hasn't loaded after that, report it
+  as blocked.
 - Don't read or debug the site's JavaScript. Identify blocked resources from the
   content blocking log, the console and the network panel; that is enough to
   attribute the breakage.

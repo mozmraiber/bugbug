@@ -87,6 +87,26 @@ insert(
 `
 );
 
+// navigator.webdriver is true while Firefox is automated, and there is no pref
+// to turn it off. Bot-protection challenges that otherwise pass on their own
+// (e.g. a proof-of-work interstitial) reject the browser when they see it, so
+// the agent can't reach the site. A preload script, which runs in every new
+// document before the page's scripts, makes the getter return false. The
+// Proxy keeps the getter's native toString.
+insert(
+  "logDebug(`Browsing context ID: ${this.currentContextId}`);",
+  `
+        await this.sendBiDiCommand("script.addPreloadScript", {
+          functionDeclaration: \`() => {
+            const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, "webdriver");
+            Object.defineProperty(Navigator.prototype, "webdriver", {
+              ...desc,
+              get: new Proxy(desc.get, { apply: () => false }),
+            });
+          }\`,
+        });`
+);
+
 // get_firefox_prefs builds its script as a template literal starting with a
 // newline, so `return ${script}` parses as a bare `return;` (automatic
 // semicolon insertion) and every read fails with "Cannot read properties of
