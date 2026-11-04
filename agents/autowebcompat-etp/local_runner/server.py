@@ -381,6 +381,51 @@ def draft_comment(result: dict[str, Any]) -> str:
     return "\n".join(out).strip() + "\n"
 
 
+EXCEPTION_CATEGORY_TAG_RE = re.compile(r"\[exception-(baseline|convenience)\]")
+DIAGNOSIS_LINE_PREFIXES = ("trackers-blocked:", "classifier-features:")
+
+
+def draft_changes(result: dict[str, Any], bug_id: int | None) -> dict[str, Any]:
+    """Whiteboard and user story edits that add the agent's diagnosis tags.
+
+    Bugzilla replaces both fields whole, so the tags are merged into the bug's
+    current values: earlier category tags and diagnosis lines are replaced.
+    """
+    tags = result.get("whiteboard_tags") or []
+    lines = result.get("user_story_lines") or []
+    if not bug_id or not (tags or lines):
+        return {}
+    try:
+        bug = bugzilla(
+            "GET",
+            f"bug/{bug_id}",
+            params={"include_fields": "whiteboard,cf_user_story"},
+            auth_required=False,
+        )["bugs"][0]
+    except HTTPException, requests.RequestException, KeyError, IndexError:
+        # Without the current values, a draft would clobber the fields.
+        return {}
+
+    changes = {}
+    whiteboard = bug.get("whiteboard", "")
+    if any(EXCEPTION_CATEGORY_TAG_RE.fullmatch(tag) for tag in tags):
+        whiteboard = EXCEPTION_CATEGORY_TAG_RE.sub("", whiteboard)
+    whiteboard += "".join(tag for tag in tags if tag not in whiteboard)
+    if whiteboard != bug.get("whiteboard", ""):
+        changes["whiteboard"] = whiteboard
+
+    story = bug.get("cf_user_story", "")
+    kept = [
+        line
+        for line in story.splitlines()
+        if not line.strip().startswith(DIAGNOSIS_LINE_PREFIXES)
+    ]
+    new_story = "\n".join(kept + lines)
+    if new_story != story:
+        changes["cf_user_story"] = new_story
+    return changes
+
+
 def guess_bug_id(path: Path, result: dict[str, Any] | None = None) -> int | None:
     """The bug a run worked on, for runs started here or elsewhere."""
     meta = read_json(path / META_FILE) or {}
@@ -576,6 +621,7 @@ def review(run_id: str) -> dict[str, Any]:
         for stage, key in ((result or {}).get("screenshot_urls") or {}).items()
         if (path / key).is_file()
     }
+    bug_id = guess_bug_id(path, result)
     return {
         "summary": summary,
         "result": result,
@@ -584,9 +630,9 @@ def review(run_id: str) -> dict[str, Any]:
         "has_agent_log": (path / "logs" / "agent.log").is_file(),
         "applied": read_json(path / APPLIED_FILE),
         "draft": {
-            "bug_id": guess_bug_id(path, result),
+            "bug_id": bug_id,
             "comment": draft_comment(result) if result else "",
-            "changes": {},
+            "changes": draft_changes(result, bug_id) if result else {},
             "attachments": list(screenshots),
         },
     }

@@ -76,6 +76,8 @@ export interface EtpResult {
   exception_verified: boolean;
   steps: string;
   exception_records: Record<string, unknown>[];
+  whiteboard_tags: string[];
+  user_story_lines: string[];
   existing_exceptions: Record<string, unknown>[] | null;
   existing_shims: Record<string, unknown>[] | null;
   screenshot_urls: Record<string, string>;

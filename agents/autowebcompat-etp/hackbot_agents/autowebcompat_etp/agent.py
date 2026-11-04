@@ -8,10 +8,11 @@ text or a Bugzilla ``bug_id`` (read via Bugzilla broker).
 """
 
 import logging
+import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import json5
 import requests
@@ -31,7 +32,12 @@ from .exceptions import (
     pattern_host,
 )
 from .mcp_servers import build_firefox_devtools_server
-from .result import RESULT_SERVER_NAME, EtpInvestigationResult, ProposedShim
+from .result import (
+    RESULT_SERVER_NAME,
+    ClassifierFeature,
+    EtpInvestigationResult,
+    ProposedShim,
+)
 from .tracker_lists import (
     CHECK_TRACKER_LISTS_TOOL,
     TRACKER_LISTS_SERVER_NAME,
@@ -59,6 +65,8 @@ SCREENSHOT_FIELDS = {
 
 class AutowebcompatEtpResult(EtpInvestigationResult):
     exception_records: list[dict[str, Any]]
+    whiteboard_tags: list[str]
+    user_story_lines: list[str]
     existing_exceptions: list[dict[str, Any]] | None
     existing_shims: list[dict[str, Any]] | None
     screenshot_urls: dict[str, str]
@@ -144,6 +152,47 @@ def exception_records(
             record["topLevelUrlPattern"] = proposal.topLevelUrlPattern
         records.append(record)
     return records
+
+
+def trackers_blocked_host(pattern: str) -> str:
+    """The host of a match pattern, keeping a leading `*.` wildcard."""
+    match = re.match(r"^[^:]+://([^/:]+)", pattern)
+    return match.group(1) if match else pattern
+
+
+def bug_tags(result: EtpInvestigationResult) -> tuple[list[str], list[str]]:
+    """The whiteboard tags and user story lines that mark the bug as diagnosed.
+
+    Follows https://wiki.mozilla.org/Privacy/Docs/How_To_Triage_ETP-Strict_Website_Breakage:
+    the Remote Settings bot picks up diagnosed bugs with an `[exception-*]`
+    category tag and the hosts and classifier features in the user story.
+    Returns empty lists unless the agent proposes exceptions.
+    """
+    proposals = result.proposed_exceptions
+    if not proposals:
+        return [], []
+    categories = [
+        category
+        for category in ("baseline", "convenience")
+        if any(p.category == category for p in proposals)
+    ]
+    if len(categories) > 1:
+        logger.warning(
+            "proposed exceptions mix baseline and convenience; the bug's tags "
+            "can only carry one category"
+        )
+    hosts = list(dict.fromkeys(trackers_blocked_host(p.urlPattern) for p in proposals))
+    features = [
+        feature
+        for feature in get_args(ClassifierFeature)
+        if any(feature in p.classifierFeatures for p in proposals)
+    ]
+    whiteboard = ["[privacy-team:diagnosed]"] + [f"[exception-{c}]" for c in categories]
+    user_story = [
+        "trackers-blocked:" + ",".join(hosts),
+        "classifier-features:" + ",".join(features),
+    ]
+    return whiteboard, user_story
 
 
 def url_patterns(value: Any) -> list[str]:
@@ -257,10 +306,13 @@ async def run_autowebcompat_etp(
         ).run()
 
     records = exception_records(result, input_data)
+    whiteboard_tags, user_story_lines = bug_tags(result)
     return AutowebcompatEtpResult(
         # The local paths mean nothing outside the container; the URLs replace them.
         **result.model_dump(exclude=set(SCREENSHOT_FIELDS.values())),
         exception_records=records,
+        whiteboard_tags=whiteboard_tags,
+        user_story_lines=user_story_lines,
         existing_exceptions=find_existing_exceptions(records),
         existing_shims=find_existing_shims(result.proposed_shim),
         screenshot_urls=publish_screenshots(result, publish_file),

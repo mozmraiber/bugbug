@@ -61,6 +61,38 @@ def test_exception_records_without_bug_id():
     assert records[0]["bugIds"] == []
 
 
+def test_bug_tags():
+    social = SITE_SCOPED | {
+        "urlPattern": "*://platform.linkedin.com/*",
+        "classifierFeatures": ["socialtracking-protection", "tracking-protection"],
+    }
+    assert agent.bug_tags(make_result(SITE_SCOPED, social)) == (
+        ["[privacy-team:diagnosed]", "[exception-baseline]"],
+        [
+            "trackers-blocked:*.licdn.com,platform.linkedin.com",
+            "classifier-features:tracking-protection,socialtracking-protection",
+        ],
+    )
+
+
+def test_bug_tags_mixed_categories(caplog):
+    convenience = GLOBAL | {"category": "convenience"}
+    whiteboard, _ = agent.bug_tags(make_result(SITE_SCOPED, convenience))
+    assert whiteboard == [
+        "[privacy-team:diagnosed]",
+        "[exception-baseline]",
+        "[exception-convenience]",
+    ]
+    assert "mix baseline and convenience" in caplog.text
+
+
+def test_bug_tags_without_exceptions():
+    result = make_result(GLOBAL).model_copy(
+        update={"failure_reason": "not_reproducible", "proposed_exceptions": []}
+    )
+    assert agent.bug_tags(result) == ([], [])
+
+
 def test_publish_screenshots(tmp_path):
     png = tmp_path / "strict.png"
     png.write_bytes(PNG_SIGNATURE)
