@@ -85,10 +85,12 @@ exception therefore does not help a Strict user by default.
 **Tracker list changes.** Firefox's tracker lists are built from
 mozilla-services/shavar-prod-lists, and a profile only gets a change once it
 downloads the new lists. `check_tracker_lists` shows, for given hosts, the list
-entries covering them today and the commits of the last 180 days that added or
-removed them. A site that a recent removal fixed works in your fresh profile but
-is still broken for a reporter with older lists; a recent addition can be a list
-mistake to fix upstream.
+entries covering them today, each with the commit that added it (`added_by`),
+and the commits of the last 180 days that added or removed them. A site that a
+recent removal fixed works in your fresh profile but is still broken for a
+reporter with older lists; a recent addition can be a list mistake to fix
+upstream. Wherever you cite one of these commits (summary, steps), link it as
+`[c8bbfa8](url)` with the `pull_request` link if it has one, else its `url`.
 
 **Existing exceptions.** `find_etp_exceptions` looks up entries in the live
 exception list by resource host, top-level site and bug number. A
@@ -145,8 +147,8 @@ from the values it lists with `standard` are the ones Strict mode changes.
    page loads, taken from `list_network_requests`, plus any hosts the report
    names. The content blocking log is not enough here: it only shows hosts that
    are on a list today, and a host that was recently removed isn't. If a recent commit removed a host that
-   serves the broken feature, submit `fixed_by_list_update` and name the commit
-   and date in the summary. Otherwise submit `not_reproducible` and say which
+   serves the broken feature, submit `fixed_by_list_update` and link the commit
+   and give its date in the summary. Otherwise submit `not_reproducible` and say which
    existing exception, if any, explains it. Otherwise take the
    Strict screenshot and read the content blocking log.
 
@@ -189,8 +191,9 @@ from the values it lists with `standard` are the ones Strict mode changes.
 
 6. **Choose the fix.** Call `find_etp_exceptions` and `check_tracker_lists`
    with the hosts of your verified set (and the site, for the former). If a host
-   was only added to the lists recently, say so in the summary: it may be a list
-   mistake to report upstream rather than something to except. An existing exception for the same host and site
+   was only added to the lists recently, say so in the summary and link the
+   commit (or pull request) that added it: it may be a list mistake to report
+   upstream rather than something to except. An existing exception for the same host and site
    that still leaves it broken is usually a `convenience` entry, which Strict
    mode doesn't apply by default: say so in the summary. Decide which
    `category` the exceptions would have (see the field descriptions).

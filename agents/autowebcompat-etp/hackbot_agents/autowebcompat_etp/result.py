@@ -202,7 +202,8 @@ class EtpInvestigationResult(BaseModel):
         mode, which blocked resource causes it, and what fixes it (an exception or a
         shim).
 
-        Hard limit: 500 characters. State conclusions, not the investigation."""
+        Hard limit: 500 characters, not counting link URLs. State conclusions, not
+        the investigation."""
         ),
     ]
 

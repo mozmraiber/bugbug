@@ -86,6 +86,25 @@ def test_history_finds_addition_and_removal(repo):
     ]
 
 
+def test_added_by_finds_latest_addition(repo):
+    # Added, removed and added again: the re-addition is the current entry's.
+    commit(repo, ["cdn3.editmysite.com", "ec.editmysite.com"], "Re-add cdn3 (#12)")
+
+    added = tracker_lists.added_by(
+        repo, "disconnect-blacklist.json", "cdn3.editmysite.com"
+    )
+
+    assert added["subject"] == "Re-add cdn3 (#12)"
+    assert added["url"] == f"{tracker_lists.WEB_URL}/commit/{added['commit']}"
+    assert added["pull_request"] == f"{tracker_lists.WEB_URL}/pull/12"
+    # Commits that only touch other domains don't count.
+    initial = tracker_lists.added_by(
+        repo, "disconnect-blacklist.json", "ec.editmysite.com"
+    )
+    assert initial["subject"] == "Initial lists"
+    assert "pull_request" not in initial
+
+
 def test_tool_reports_entries_and_history(repo):
     reply = asyncio.run(
         tracker_lists.check_tracker_lists.handler(
@@ -96,8 +115,13 @@ def test_tool_reports_entries_and_history(repo):
     host = result["hosts"]["cdn3.editmysite.com"]
 
     assert host["blocklist_entries"] == []
-    assert [e["org"] for e in host["entities"]] == ["Block"]
+    [entity] = host["entities"]
+    assert entity["org"] == "Block"
+    assert entity["added_by"]["editmysite.com"]["subject"] == "Initial lists"
     assert [c["subject"] for c in host["recent_changes"]] == ["Remove cdn3", "Add cdn3"]
+    assert all(
+        c["url"].startswith(tracker_lists.WEB_URL) for c in host["recent_changes"]
+    )
 
 
 def test_tool_needs_hosts():
