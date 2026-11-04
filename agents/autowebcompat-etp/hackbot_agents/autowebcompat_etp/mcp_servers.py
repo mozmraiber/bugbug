@@ -13,6 +13,12 @@ from claude_agent_sdk.types import McpStdioServerConfig
 # so the agent sees the same ETP exceptions as real users.
 REMOTE_SETTINGS_SERVER = "https://firefox.settings.services.mozilla.com/v1"
 
+# Nightly blocks trackers with the new content classifier, which ignores the
+# skip-URL prefs the agent tests exceptions with. Turning off its pref mirror
+# leaves blocking to the classic URL classifier, which release users run and the
+# url-classifier-exceptions list targets.
+CONTENT_CLASSIFIER_MIRROR_PREF = "privacy.trackingprotection.content.mirror.mode=0"
+
 
 def resolve_bin(bin_name: str) -> str:
     """Resolve an installed MCP server binary to an absolute path."""
@@ -42,6 +48,8 @@ def build_firefox_devtools_server(
         str(firefox_path),
         "--pref",
         f"services.settings.server={REMOTE_SETTINGS_SERVER}",
+        "--pref",
+        CONTENT_CLASSIFIER_MIRROR_PREF,
     ]
     if headless:
         args.append("--headless")
