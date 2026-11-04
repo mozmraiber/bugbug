@@ -20,6 +20,8 @@ def make_result(*proposals):
         blocked_resources=[],
         proposed_exceptions=list(proposals),
         exception_verified=True,
+        severity="S3",
+        priority="P3",
         steps="",
     )
 

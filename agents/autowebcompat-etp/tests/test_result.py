@@ -26,6 +26,8 @@ def make_result(**overrides):
         "blocked_resources": ["https://platform.linkedin.com (socialtracking)"],
         "proposed_exceptions": [PROPOSAL],
         "exception_verified": True,
+        "severity": "S3",
+        "priority": "P3",
         "steps": "1. Set browser.contentblocking.category to strict.",
     }
     return EtpInvestigationResult.model_validate(fields | overrides)

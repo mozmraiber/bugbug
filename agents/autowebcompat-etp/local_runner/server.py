@@ -388,27 +388,35 @@ DIAGNOSIS_LINE_PREFIXES = ("trackers-blocked:", "classifier-features:")
 
 
 def draft_changes(result: dict[str, Any], bug_id: int | None) -> dict[str, Any]:
-    """Whiteboard and user story edits that add the agent's diagnosis tags.
+    """Field edits that add the agent's diagnosis tags and triage.
 
-    Bugzilla replaces both fields whole, so the tags are merged into the bug's
-    current values: earlier category tags and diagnosis lines are replaced.
+    Bugzilla replaces the whiteboard and user story whole, so the tags are
+    merged into the bug's current values: earlier category tags and diagnosis
+    lines are replaced. Severity and priority are only set if the bug has none.
     """
     tags = result.get("whiteboard_tags") or []
     lines = result.get("user_story_lines") or []
-    if not bug_id or not (tags or lines):
+    triage = {
+        field: value
+        for field in ("severity", "priority")
+        if (value := result.get(field))
+    }
+    if not bug_id or not (tags or lines or triage):
         return {}
     try:
         bug = bugzilla(
             "GET",
             f"bug/{bug_id}",
-            params={"include_fields": "whiteboard,cf_user_story"},
+            params={"include_fields": "whiteboard,cf_user_story,severity,priority"},
             auth_required=False,
         )["bugs"][0]
     except HTTPException, requests.RequestException, KeyError, IndexError:
         # Without the current values, a draft would clobber the fields.
         return {}
 
-    changes = {}
+    changes = {
+        field: value for field, value in triage.items() if bug.get(field) == "--"
+    }
     whiteboard = bug.get("whiteboard", "")
     if any(EXCEPTION_CATEGORY_TAG_RE.fullmatch(tag) for tag in tags):
         whiteboard = EXCEPTION_CATEGORY_TAG_RE.sub("", whiteboard)

@@ -74,6 +74,8 @@ export interface EtpResult {
   proposed_exceptions: ProposedException[];
   proposed_shim: ProposedShim | null;
   exception_verified: boolean;
+  severity: "S1" | "S2" | "S3" | "S4" | null;
+  priority: "P1" | "P2" | "P3" | null;
   steps: string;
   exception_records: Record<string, unknown>[];
   whiteboard_tags: string[];

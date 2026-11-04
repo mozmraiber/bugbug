@@ -326,6 +326,38 @@ class EtpInvestigationResult(BaseModel):
         ),
     ]
 
+    severity: Annotated[
+        Literal["S1", "S2", "S3", "S4"] | None,
+        Field(
+            description="""The Bugzilla severity of the reported breakage, judged from what you
+        observed or, if you couldn't test, from the report:
+          * S1 - The site is unusable: it doesn't load or is blank
+          * S2 - A core feature or flow is broken with no workaround (can't log in,
+          check out, play the main video, submit the main form)
+          * S3 - A non-core feature is broken or missing (embedded social posts or
+          videos, "sign in with" buttons, comments, maps, chat widgets), or a core one
+          has a workaround
+          * S4 - Cosmetic: layout glitches or missing decoration with no loss of
+          function
+        Breakage caused by Strict mode is almost never S1: the user can turn off
+        tracking protection for the site, so even a site that doesn't load in Strict
+        is usually S2.
+        Null if the report doesn't describe site breakage (`not_etp`)."""
+        ),
+    ]
+
+    priority: Annotated[
+        Literal["P1", "P2", "P3"] | None,
+        Field(
+            description="""The Bugzilla priority, weighing severity against how many users hit
+        it. Breakage limited to Strict mode or Private Browsing reaches few users.
+          * P1 - S1/S2 on a very popular site (a top global or national site)
+          * P2 - S1/S2 on a well-known site, or S3 on a very popular one
+          * P3 - Everything else, e.g. S3/S4 on a niche site or forum
+        Null when `severity` is null."""
+        ),
+    ]
+
     steps: Annotated[
         str,
         Field(
@@ -408,4 +440,6 @@ class EtpInvestigationResult(BaseModel):
                 "proposed_exceptions and proposed_shim must be empty when "
                 "failure_reason is set"
             )
+        if (self.severity is None) != (self.priority is None):
+            raise ValueError("set both severity and priority, or neither")
         return self

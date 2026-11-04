@@ -67,6 +67,10 @@ export function ResultView() {
             {brokenLabel(result.broken_in_standard)} /{" "}
             {brokenLabel(result.broken_in_strict)}
           </dd>
+          <dt>Severity / priority</dt>
+          <dd>
+            {result.severity ?? "—"} / {result.priority ?? "—"}
+          </dd>
           <dt>Culprit prefs</dt>
           <dd>
             {result.culprit_prefs.length
