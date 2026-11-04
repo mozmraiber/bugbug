@@ -1,5 +1,6 @@
 // Adds the ETP tools in etp-tools.js to the installed Firefox DevTools MCP
-// bundle. Runs at image build time, after `npm ci`:
+// bundle, and fixes a bug in its get_firefox_prefs. Runs at image build time,
+// after `npm ci`:
 //
 //   node mcp/patch-mcp.mjs <path to node_modules/@mozilla/firefox-devtools-mcp-moz>
 //
@@ -45,7 +46,7 @@ const tools = readFileSync(
   "utf8"
 );
 
-function insert(anchor, text, { before = false } = {}) {
+function replace(anchor, text) {
   const count = bundle.split(anchor).length - 1;
   if (count !== 1) {
     console.error(
@@ -54,9 +55,11 @@ function insert(anchor, text, { before = false } = {}) {
     process.exit(1);
   }
   // A replacer function, so `$` sequences in the inserted code stay literal.
-  bundle = bundle.replace(anchor, () =>
-    before ? text + anchor : anchor + text
-  );
+  bundle = bundle.replace(anchor, () => text);
+}
+
+function insert(anchor, text, { before = false } = {}) {
+  replace(anchor, before ? text + anchor : anchor + text);
 }
 
 // The tool code, at module scope next to the bundle's own prefs tools.
@@ -82,6 +85,15 @@ insert(
       getContentBlockingLogTool,
       waitForPageLoadTool,
 `
+);
+
+// get_firefox_prefs builds its script as a template literal starting with a
+// newline, so `return ${script}` parses as a bare `return;` (automatic
+// semicolon insertion) and every read fails with "Cannot read properties of
+// null (reading 'exists')".
+replace(
+  "driver.executeScript(`return ${script}`)",
+  "driver.executeScript(`return ${script.trim()}`)"
 );
 
 writeFileSync(bundlePath, bundle);
