@@ -74,6 +74,20 @@ const ETP_SET_MODE_SCRIPT = `
   return { category: Services.prefs.getStringPref(category), changed };
 `;
 
+// Clears cookies, site data and caches, so the next load is a first visit like
+// in a fresh Private Browsing window. Otherwise state from the previous mode
+// carries over: e.g. a bot-protection cookie earned in Standard lets the site
+// skip the challenge that breaks in Strict. Calls back with the flags of the
+// cleaners that failed (0 if none).
+const ETP_CLEAR_DATA_SCRIPT = `
+  const done = arguments[arguments.length - 1];
+  const S = Ci.nsIClearDataService;
+  Services.clearData.deleteData(
+    S.CLEAR_ALL_CACHES | S.CLEAR_COOKIES_AND_SITE_DATA,
+    { onDataDeleted: (failedFlags) => done({ failedFlags }) }
+  );
+`;
+
 // Starts the downloads Strict mode depends on, once per session, and reports
 // their progress on every call: the tracker lists (Safe Browsing tables of the
 // mozilla provider) and the url-classifier-exceptions Remote Settings
@@ -180,6 +194,14 @@ async function handleSetEtpMode(args2) {
     // silently doesn't block.
     const lists = mode === "strict" ? await etpEnsureProtectionLists() : null;
     const result = await etpRunChrome(ETP_SET_MODE_SCRIPT, {}, mode);
+    const { failedFlags } = await etpRunChrome(ETP_CLEAR_DATA_SCRIPT, {
+      isAsync: true,
+    });
+    if (failedFlags) {
+      throw new Error(
+        `Clearing cookies, site data and caches failed (flags ${failedFlags})`
+      );
+    }
     const changed = Object.entries(result.changed);
     return successResponse(
       `ETP category is now ${result.category}. ` +
@@ -202,6 +224,7 @@ async function handleSetEtpMode(args2) {
               lists.exceptionList.exceptions
             } ETP exception records.\n`
           : "") +
+        "Cleared cookies, site data and caches, so the next load is a first visit.\n" +
         "Reload the page (navigate_page) for the change to apply to it."
     );
   } catch (error2) {
@@ -341,7 +364,7 @@ var waitForPageLoadTool = {
 var setEtpModeTool = {
   name: "set_etp_mode",
   description:
-    "Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category's prefs at once; the response lists the ones off their Standard values. Switching to Strict fails with an error if the tracker lists or the ETP exception list can't be downloaded. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
+    "Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category's prefs at once; the response lists the ones off their Standard values. Also clears all cookies, site data and caches, so the next load is a first visit (logins and site state are lost). Switching to Strict fails with an error if the tracker lists or the ETP exception list can't be downloaded. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
   inputSchema: {
     type: "object",
     properties: {

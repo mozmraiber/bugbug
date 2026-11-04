@@ -159,7 +159,8 @@ ones Strict mode changes, each with its Standard value.
    breakage and verifies it in one go. Otherwise, find the culprit by reverting
    prefs: one at a time, revert a Strict pref to its Standard value with
    `set_firefox_prefs`, reload, follow the steps and check whether the breakage
-   is gone, then restore it before trying the next one. Record the pref(s) that
+   is gone, then call `set_etp_mode` with `strict` to restore it and clear the
+   site data that load left behind before trying the next one. Record the pref(s) that
    fix it in `culprit_prefs`. If only non-classifier prefs fix it, submit
    `not_fixable_by_exception`.
 
