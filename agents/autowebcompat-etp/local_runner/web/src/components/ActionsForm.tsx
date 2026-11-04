@@ -8,7 +8,11 @@ import { store } from "../store";
 
 function describe(applied: Snapshot<Applied>): string {
   return applied.actions
-    .map((a) => a.action + (a.stage ? ` (${a.stage})` : ""))
+    .map((a) => {
+      // Records from before screenshots were combined name a single stage.
+      const stages = a.stages ?? (a.stage ? [a.stage] : []);
+      return a.action + (stages.length ? ` (${stages.join(", ")})` : "");
+    })
     .join(", ");
 }
 

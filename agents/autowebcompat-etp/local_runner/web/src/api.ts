@@ -97,8 +97,10 @@ export interface Summary {
 export interface AppliedAction {
   action: string;
   stage?: string;
+  stages?: string[];
   fields?: string[];
   ids?: number[];
+  with_comment?: boolean;
 }
 
 export interface Applied {

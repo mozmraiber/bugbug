@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["fastapi", "uvicorn", "requests", "python-dotenv"]
+# dependencies = ["fastapi", "uvicorn", "requests", "python-dotenv", "pillow"]
 # ///
 """Local runner and review UI for the autowebcompat-etp agent.
 
@@ -23,6 +23,7 @@ applying the reviewed actions.
 """
 
 import base64
+import io
 import json
 import os
 import queue
@@ -41,6 +42,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel
 
 HERE = Path(__file__).resolve().parent
@@ -446,6 +448,36 @@ def guess_bug_id(path: Path, result: dict[str, Any] | None = None) -> int | None
     return None
 
 
+def combine_screenshots(paths: list[Path], labels: list[str]) -> bytes:
+    """The screenshots side by side, each under its label, as one PNG."""
+    images = [Image.open(p).convert("RGB") for p in paths]
+    height = max(image.height for image in images)
+    images = [
+        image.resize((round(image.width * height / image.height), height))
+        for image in images
+    ]
+    font = ImageFont.load_default(size=max(16, height // 30))
+    header = font.size * 2
+    gap = header // 2
+    combined = Image.new(
+        "RGB",
+        (
+            sum(image.width for image in images) + gap * (len(images) - 1),
+            header + height,
+        ),
+        "white",
+    )
+    draw = ImageDraw.Draw(combined)
+    x = 0
+    for image, label in zip(images, labels):
+        draw.text((x + image.width // 2, header // 2), label, "black", font, "mm")
+        combined.paste(image, (x, header))
+        x += image.width + gap
+    out = io.BytesIO()
+    combined.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
 # --- Bugzilla ----------------------------------------------------------------
 
 
@@ -667,8 +699,11 @@ def apply(run_id: str, req: ApplyRequest) -> dict[str, Any]:
         "error": None,
     }
     body = dict(req.changes)
-    if req.comment.strip():
-        body["comment"] = {"body": req.comment, "is_markdown": True}
+    comment = req.comment if req.comment.strip() else None
+    # The comment rides on the screenshot attachment, so the image shows in
+    # the same post; without one it goes in with the field changes.
+    if comment and not req.attachments:
+        body["comment"] = {"body": comment, "is_markdown": True}
     try:
         for stage in req.attachments:
             key = screenshot_keys.get(stage)
@@ -677,21 +712,29 @@ def apply(run_id: str, req: ApplyRequest) -> dict[str, Any]:
         if body:
             bugzilla("PUT", f"bug/{req.bug_id}", body)
             done.append({"action": "update_bug", "fields": sorted(body)})
-        for stage in req.attachments:
-            key = screenshot_keys[stage]
-            data = bugzilla(
-                "POST",
-                f"bug/{req.bug_id}/attachment",
-                {
-                    "ids": [req.bug_id],
-                    "data": base64.b64encode((path / key).read_bytes()).decode(),
-                    "file_name": f"{stage}.png",
-                    "summary": f"Screenshot: {SCREENSHOT_LABELS.get(stage, stage)}",
-                    "content_type": "image/png",
-                },
+        if req.attachments:
+            stages = req.attachments
+            labels = [SCREENSHOT_LABELS.get(stage, stage) for stage in stages]
+            png = combine_screenshots(
+                [path / screenshot_keys[stage] for stage in stages], labels
             )
+            attachment = {
+                "ids": [req.bug_id],
+                "data": base64.b64encode(png).decode(),
+                "file_name": "-".join(stages) + ".png",
+                "summary": "Screenshots: " + " / ".join(labels),
+                "content_type": "image/png",
+            }
+            if comment:
+                attachment |= {"comment": comment, "is_markdown": True}
+            data = bugzilla("POST", f"bug/{req.bug_id}/attachment", attachment)
             done.append(
-                {"action": "add_attachment", "stage": stage, "ids": data.get("ids")}
+                {
+                    "action": "add_attachment",
+                    "stages": stages,
+                    "ids": data.get("ids"),
+                    "with_comment": bool(comment),
+                }
             )
     except HTTPException as exc:
         record["error"] = exc.detail

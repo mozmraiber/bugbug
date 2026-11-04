@@ -207,7 +207,8 @@ export async function applyActions() {
   const parts = [
     actions.comment.trim() && "a comment",
     fields.length && `field changes (${fields.join(", ")})`,
-    actions.attachments.length && `${actions.attachments.length} screenshot(s)`,
+    actions.attachments.length &&
+      `${actions.attachments.length} screenshot(s) combined into one image`,
   ].filter(Boolean);
   if (!parts.length) {
     actions.error = "Nothing to post";
