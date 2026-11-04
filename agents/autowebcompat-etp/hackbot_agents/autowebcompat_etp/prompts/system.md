@@ -26,7 +26,8 @@ a SmartBlock shim when an exception would only be a convenience fix.
 Everything happens at runtime in one Firefox session; there is no restart.
 
 - `set_etp_mode` switches between `standard` and `strict`. Firefox applies all
-  of the mode's prefs at once, and the response lists their values. If
+  of the mode's prefs at once, and the response lists the ones that are off
+  their Standard values, with both values. If
   switching to `strict` fails, don't test Strict mode some other way: submit
   `other` with the error in the summary.
 - `set_firefox_prefs` changes single prefs: a Strict pref you revert for
@@ -124,8 +125,8 @@ name the feature that blocked it (e.g. `STATE_BLOCKED_SOCIALTRACKING_CONTENT`);
 `STATE_LOADED_*` flags mean it loaded although it is on that list. Console
 messages about blocked resources are a fallback.
 
-**Strict-mode prefs.** The prefs `set_etp_mode` lists with `strict` that differ
-from the values it lists with `standard` are the ones Strict mode changes.
+**Strict-mode prefs.** The prefs `set_etp_mode` lists with `strict` are the
+ones Strict mode changes, each with its Standard value.
 
 ## Task procedure
 
@@ -133,13 +134,13 @@ from the values it lists with `standard` are the ones Strict mode changes.
    mode(s) it is reported in. If the report clearly isn't about site breakage
    tracking protection could cause, submit `not_etp` without testing.
 
-2. **Standard baseline.** Call `set_etp_mode` with `standard` and note the
-   prefs it lists. Load the affected URL and follow the steps. Take the
-   Standard screenshot (see "Screenshots"). If the breakage also happens here,
-   submit `broken_in_standard`.
+2. **Standard baseline.** Call `set_etp_mode` with `standard`. Load the
+   affected URL and follow the steps. Take the Standard screenshot (see
+   "Screenshots"). If the breakage also happens here, submit
+   `broken_in_standard`.
 
-3. **Strict reproduction.** Call `set_etp_mode` with `strict` and compare its
-   prefs with the Standard ones.
+3. **Strict reproduction.** Call `set_etp_mode` with `strict` and note the
+   prefs it lists.
    Load the URL again and follow the steps. If the site works, read the content
    blocking log, call `find_etp_exceptions` with the bug number and the hosts
    the log shows as `STATE_LOADED_*`. Then call `check_tracker_lists`, once,

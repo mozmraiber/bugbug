@@ -40,7 +40,9 @@ async function etpRunChrome(script, { isAsync = false } = {}, ...scriptArgs) {
   }
 }
 
-// Reads every pref the Strict category controls, after Firefox applied `mode`.
+// Applies `mode`, then reads the prefs the Strict category controls that are
+// off their Standard values. Standard expects every one of them at its default
+// value, so those are the default-branch values.
 const ETP_SET_MODE_SCRIPT = `
   const mode = arguments[0];
   const category = "browser.contentblocking.category";
@@ -50,19 +52,26 @@ const ETP_SET_MODE_SCRIPT = `
   const { ContentBlockingPrefs } = ChromeUtils.importESModule(
     "moz-src:///browser/components/protections/ContentBlockingPrefs.sys.mjs"
   );
-  const read = (p) => {
-    switch (Services.prefs.getPrefType(p)) {
-      case Services.prefs.PREF_BOOL: return Services.prefs.getBoolPref(p);
-      case Services.prefs.PREF_INT: return Services.prefs.getIntPref(p);
-      case Services.prefs.PREF_STRING: return Services.prefs.getStringPref(p);
-    }
+  const read = (branch, p) => {
+    try {
+      switch (branch.getPrefType(p)) {
+        case branch.PREF_BOOL: return branch.getBoolPref(p);
+        case branch.PREF_INT: return branch.getIntPref(p);
+        case branch.PREF_STRING: return branch.getStringPref(p);
+      }
+    } catch {}
     return null;
   };
-  const prefs = {};
+  const defaults = Services.prefs.getDefaultBranch("");
+  const changed = {};
   for (const p of Object.keys(ContentBlockingPrefs.CATEGORY_PREFS.strict)) {
-    prefs[p] = read(p);
+    const value = read(Services.prefs, p);
+    const standard = read(defaults, p);
+    if (value !== standard) {
+      changed[p] = { value, standard };
+    }
   }
-  return { category: Services.prefs.getStringPref(category), prefs };
+  return { category: Services.prefs.getStringPref(category), changed };
 `;
 
 // Starts the downloads Strict mode depends on, once per session, and reports
@@ -171,14 +180,29 @@ async function handleSetEtpMode(args2) {
     // silently doesn't block.
     const lists = mode === "strict" ? await etpEnsureProtectionLists() : null;
     const result = await etpRunChrome(ETP_SET_MODE_SCRIPT, {}, mode);
+    const changed = Object.entries(result.changed);
     return successResponse(
-      `ETP category is now ${result.category}. Category prefs:\n` +
-        JSON.stringify(result.prefs, null, 2) +
+      `ETP category is now ${result.category}. ` +
+        (changed.length
+          ? "Prefs off their Standard values:\n" +
+            changed
+              .map(
+                ([p, { value, standard }]) =>
+                  `${p} = ${JSON.stringify(value)} (Standard: ${JSON.stringify(
+                    standard
+                  )})`
+              )
+              .join("\n") +
+            "\n"
+          : "All of its prefs are at their Standard values.\n") +
         (lists
-          ? "\nTracker lists and ETP exception list:\n" +
-            JSON.stringify(lists, null, 2)
+          ? `Tracker lists updated ${new Date(
+              Number(lists.lists.lastUpdate)
+            ).toISOString()}; ${
+              lists.exceptionList.exceptions
+            } ETP exception records.\n`
           : "") +
-        "\nReload the page (navigate_page) for the change to apply to it."
+        "Reload the page (navigate_page) for the change to apply to it."
     );
   } catch (error2) {
     return errorResponse(
@@ -317,7 +341,7 @@ var waitForPageLoadTool = {
 var setEtpModeTool = {
   name: "set_etp_mode",
   description:
-    "Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category's prefs at once; the response lists them. Switching to Strict fails with an error if the tracker lists or the ETP exception list can't be downloaded. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
+    "Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category's prefs at once; the response lists the ones off their Standard values. Switching to Strict fails with an error if the tracker lists or the ETP exception list can't be downloaded. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
   inputSchema: {
     type: "object",
     properties: {
