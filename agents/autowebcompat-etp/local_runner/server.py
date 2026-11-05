@@ -144,6 +144,7 @@ class Run:
             "turns": self.turns,
             "cost": self.cost,
             "active": True,
+            "applied": (self.dir / APPLIED_FILE).exists(),
         }
 
 
