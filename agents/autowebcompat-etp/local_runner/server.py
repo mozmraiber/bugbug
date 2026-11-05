@@ -33,6 +33,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,15 @@ TURN_RE = re.compile(r"^--- turn (\d+) ---$")
 COST_RE = re.compile(r"cost=\$([\d.]+)")
 
 
+class RunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    OK = "ok"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
+
+
 @dataclass
 class Run:
     run_id: str
@@ -107,7 +117,7 @@ class Run:
     queued: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
-    status: str = "queued"  # queued | running | ok | error | cancelled
+    status: RunStatus = RunStatus.QUEUED
     lines: list[str] = field(default_factory=list)
     turns: int = 0
     cost: float | None = None
@@ -245,8 +255,11 @@ def execute(run: Run) -> None:
         code = -1
 
     summary = read_json(run.dir / "summary.json")
-    if run.status != "cancelled":
-        run.status = (summary or {}).get("status") or ("ok" if code == 0 else "error")
+    if run.status != RunStatus.CANCELLED:
+        run.status = RunStatus(
+            (summary or {}).get("status")
+            or (RunStatus.OK if code == 0 else RunStatus.ERROR)
+        )
     run.add_line(f"[runner] exited with code {code}, status {run.status}")
     with run.changed:
         run.finished = time.time()
@@ -258,15 +271,15 @@ def worker() -> None:
     while True:
         run = RUN_QUEUE.get()
         with STATUS_LOCK:
-            if run.status != "queued":  # cancelled while waiting
+            if run.status != RunStatus.QUEUED:  # cancelled while waiting
                 continue
-            run.status = "running"
+            run.status = RunStatus.RUNNING
             run.started = time.time()
         write_meta(run)
         try:
             execute(run)
         except Exception as exc:
-            run.status = "error"
+            run.status = RunStatus.ERROR
             run.add_line(f"[runner] {exc}")
             with run.changed:
                 run.finished = time.time()
@@ -315,10 +328,10 @@ def stored_run_info(path: Path) -> dict[str, Any] | None:
             "turns": summary["findings"].get("num_turns"),
             "cost": summary["findings"].get("total_cost_usd"),
         }
-    if meta.get("status") in ("queued", "running"):
+    if meta.get("status") in (RunStatus.QUEUED, RunStatus.RUNNING):
         # Left behind by an earlier server process; a running container may
         # still finish and write summary.json.
-        meta["status"] = (summary or {}).get("status") or "interrupted"
+        meta["status"] = (summary or {}).get("status") or RunStatus.INTERRUPTED
     meta["active"] = False
     meta["applied"] = (path / APPLIED_FILE).exists()
     return meta
@@ -604,8 +617,8 @@ def cancel_run(run_id: str) -> dict[str, Any]:
     if run is None or run.finished is not None:
         raise HTTPException(400, "run is not active")
     with STATUS_LOCK:
-        was_queued = run.status == "queued"
-        run.status = "cancelled"
+        was_queued = run.status == RunStatus.QUEUED
+        run.status = RunStatus.CANCELLED
     if was_queued:
         run.add_line("[runner] removed from the queue")
         with run.changed:
