@@ -111,18 +111,14 @@ def test_failure_has_no_proposals():
         make_result(failure_reason="other", proposed_exceptions=[], proposed_shim=SHIM)
 
 
-def test_anti_adblock_needs_verified_exceptions_or_a_shim():
+def test_anti_adblock_needs_verified_exceptions():
     make_result(failure_reason="anti_adblock")
-    make_result(
-        failure_reason="anti_adblock", proposed_exceptions=[], proposed_shim=STUB_SHIM
-    )
-    with pytest.raises(ValidationError, match="not both"):
-        make_result(failure_reason="anti_adblock", proposed_exceptions=[])
-    with pytest.raises(ValidationError, match="not both"):
-        make_result(failure_reason="anti_adblock", proposed_shim=STUB_SHIM)
-    make_result(
-        failure_reason="anti_adblock", proposed_exceptions=[], proposed_shim=SHIM
-    )
+    make_result(failure_reason="anti_adblock", proposed_shim=STUB_SHIM)
+    make_result(failure_reason="anti_adblock", proposed_shim=SHIM)
+    with pytest.raises(ValidationError, match="needs proposed_exceptions"):
+        make_result(
+            failure_reason="anti_adblock", proposed_exceptions=[], proposed_shim=SHIM
+        )
     with pytest.raises(ValidationError, match="requires exception_verified"):
         make_result(failure_reason="anti_adblock", exception_verified=False)
 

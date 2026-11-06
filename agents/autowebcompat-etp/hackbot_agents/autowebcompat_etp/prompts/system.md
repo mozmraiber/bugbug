@@ -227,13 +227,13 @@ ones Strict mode changes, each with its Standard value.
 
    - If the breakage is the site's anti-adblock measure (it detects that its
      ads or trackers are blocked and refuses to work, e.g. a "please disable
-     your ad blocker" wall), submit `anti_adblock`. If a shim can satisfy
-     the detection while the resources stay blocked (a stub defining the ad
-     library globals the site checks for, or a placeholder in place of the
-     ad), propose it in `proposed_shim` as in the next bullet: it keeps the
-     protection on.
-     Otherwise turn the verified set into `proposed_exceptions` as in the last
-     bullet; a reviewer decides whether to add them.
+     your ad blocker" wall), submit `anti_adblock`. Turn the verified set into
+     `proposed_exceptions` as in the last bullet; a reviewer decides whether
+     to add them. If a shim can also satisfy the detection while the resources
+     stay blocked (a stub defining the ad library globals the site checks for,
+     or a placeholder in place of the ad), propose it in `proposed_shim` too,
+     filled in as the next bullet describes but keeping the exceptions: it
+     keeps the protection on.
    - If they would all be `convenience` **and** a shim is possible (see
      "Shims"), propose a shim in `proposed_shim` and leave
      `proposed_exceptions` empty. Note the script(s) that start the widget in
