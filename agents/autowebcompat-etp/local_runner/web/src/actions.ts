@@ -79,15 +79,10 @@ export async function startRun() {
 // --- the selected run -------------------------------------------------------
 
 let source: EventSource | null = null;
-let pending: string[] = [];
-let frame = 0;
 
 function closeStream() {
   source?.close();
   source = null;
-  cancelAnimationFrame(frame);
-  frame = 0;
-  pending = [];
 }
 
 /** Select a run and follow its output; the server replays it from the start. */
@@ -112,23 +107,15 @@ function openRun(runId: string | null) {
   const run = store.run;
   const stream = (source = new EventSource(api.streamUrl(runId)));
 
-  // Batch lines per animation frame: a replayed log arrives all at once.
-  const flush = () => {
-    frame = 0;
-    run.lines.push(...pending);
-    pending = [];
-  };
+  // Each message is a batch of lines; a replayed log arrives as one.
   stream.onmessage = (e) => {
-    pending.push(JSON.parse(e.data) as string);
-    frame ||= requestAnimationFrame(flush);
+    run.lines.push(...(JSON.parse(e.data) as string[]));
   };
   stream.addEventListener("status", (e) => {
     run.info = JSON.parse((e as MessageEvent).data) as RunInfo;
     store.now = Date.now();
   });
   stream.addEventListener("end", () => {
-    cancelAnimationFrame(frame);
-    flush();
     stream.close();
     source = null;
     run.ended = true;

@@ -646,15 +646,17 @@ def stream(run_id: str) -> StreamingResponse:
         if run is None:
             output = path / OUTPUT_FILE
             lines = output.read_text().splitlines() if output.exists() else []
-            for line in lines:
-                yield f"data: {json.dumps(line)}\n\n"
+            # Each message is a batch of lines, so a replay renders at once.
+            if lines:
+                yield f"data: {json.dumps(lines)}\n\n"
             yield "event: end\ndata: {}\n\n"
             return
         sent = 0
         while True:
-            while sent < len(run.lines):
-                yield f"data: {json.dumps(run.lines[sent])}\n\n"
-                sent += 1
+            if sent < len(run.lines):
+                lines = run.lines[sent:]
+                yield f"data: {json.dumps(lines)}\n\n"
+                sent += len(lines)
             yield f"event: status\ndata: {json.dumps(run.info())}\n\n"
             if run.finished is not None:
                 yield "event: end\ndata: {}\n\n"
