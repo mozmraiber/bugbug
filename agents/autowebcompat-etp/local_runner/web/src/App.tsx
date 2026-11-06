@@ -41,9 +41,17 @@ export function App() {
           type="button"
           className="secondary wide"
           disabled={!config}
-          onClick={openTriage}
+          onClick={() => openTriage("untriaged")}
         >
           Queue untriaged bugs…
+        </button>
+        <button
+          type="button"
+          className="secondary wide"
+          disabled={!config}
+          onClick={() => openTriage("open")}
+        >
+          Queue open bugs…
         </button>
         <h2>Runs</h2>
         <RunList />

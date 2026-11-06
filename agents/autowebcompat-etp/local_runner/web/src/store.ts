@@ -9,7 +9,8 @@ import type {
   Review,
   RunInfo,
   RunOptions,
-  UntriagedBug,
+  BugQuery,
+  ListedBug,
   WhoAmI,
 } from "./api";
 
@@ -54,8 +55,9 @@ export interface RunState {
 export type TriageStep = 1 | 2 | 3;
 
 export interface TriageState {
+  query: BugQuery;
   step: TriageStep;
-  bugs: UntriagedBug[];
+  bugs: ListedBug[];
   selected: number[];
   options: RunOptions;
   busy: boolean;
@@ -82,7 +84,7 @@ export const store = proxy({
     error: null,
   } as StartState,
   run: null as RunState | null,
-  /** The untriaged-bugs dialog, while open. */
+  /** The queue-from-Bugzilla dialog, while open. */
   triage: null as TriageState | null,
   /** Wall clock in ms, ticking while a run is in progress. */
   now: Date.now(),

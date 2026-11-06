@@ -92,6 +92,21 @@ UNTRIAGED_QUERY = {
     "bug_severity": "--",
     "bug_type": "defect",
 }
+# All open ETP site reports, most recently changed first: the REST equivalent of
+# https://bugzilla.mozilla.org/buglist.cgi?bug_status=UNCONFIRMED&bug_status=NEW&bug_status=ASSIGNED&bug_status=REOPENED&component=Privacy%3A%20Site%20Reports&product=Web%20Compatibility&query_format=advanced&order=changeddate%20DESC
+OPEN_QUERY = {
+    "product": "Web Compatibility",
+    "component": "Privacy: Site Reports",
+    "bug_status": ["UNCONFIRMED", "NEW", "ASSIGNED", "REOPENED"],
+    "order": "changeddate DESC",
+    "limit": 0,
+}
+# The bug lists the UI can queue from, and the field each is sorted by.
+BUG_QUERIES = {
+    "untriaged": (UNTRIAGED_QUERY, "creation_time"),
+    "open": (OPEN_QUERY, "last_change_time"),
+}
+META_SUMMARY_RE = re.compile(r"\[meta\]", re.IGNORECASE)
 
 # The Reporter header the agent log starts with when the input is a bug ID.
 LOG_SUBJECT_RE = re.compile(r"^# bug (\d+)$", re.MULTILINE)
@@ -572,18 +587,27 @@ def config() -> dict[str, Any]:
         "has_anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "has_bugzilla_key": bool(os.environ.get("BUGZILLA_API_KEY")),
         "max_parallel": MAX_PARALLEL,
-        "untriaged_url": f"{BUGZILLA_ROOT}/buglist.cgi?query_format=advanced&"
-        + requests.compat.urlencode(UNTRIAGED_QUERY),
+        "query_urls": {
+            name: f"{BUGZILLA_ROOT}/buglist.cgi?query_format=advanced&"
+            + requests.compat.urlencode(query, doseq=True)
+            for name, (query, _) in BUG_QUERIES.items()
+        },
     }
 
 
-@app.get("/api/untriaged")
-def untriaged() -> list[dict[str, Any]]:
+@app.get("/api/bugs/{query}")
+def bug_list(query: str) -> list[dict[str, Any]]:
+    if query not in BUG_QUERIES:
+        raise HTTPException(404, f"unknown query {query}")
+    params, sort_key = BUG_QUERIES[query]
     data = bugzilla(
         "GET",
         "bug",
-        params=UNTRIAGED_QUERY
-        | {"include_fields": "id,summary,creation_time,url,status,whiteboard"},
+        params=params
+        | {
+            "include_fields": "id,summary,creation_time,last_change_time,url,"
+            "status,whiteboard"
+        },
         auth_required=False,
     )
     runs_by_bug: dict[int, list[dict[str, Any]]] = {}
@@ -592,8 +616,12 @@ def untriaged() -> list[dict[str, Any]]:
             runs_by_bug.setdefault(int(bug_id), []).append(
                 {"run_id": run["run_id"], "status": run["status"]}
             )
-    bugs = [bug | {"runs": runs_by_bug.get(bug["id"], [])} for bug in data["bugs"]]
-    return sorted(bugs, key=lambda bug: bug["creation_time"], reverse=True)
+    bugs = [
+        bug | {"runs": runs_by_bug.get(bug["id"], [])}
+        for bug in data["bugs"]
+        if not META_SUMMARY_RE.search(bug["summary"])
+    ]
+    return sorted(bugs, key=lambda bug: bug[sort_key], reverse=True)
 
 
 @app.get("/api/whoami")

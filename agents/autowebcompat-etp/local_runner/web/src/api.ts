@@ -47,8 +47,11 @@ export interface Config {
   has_anthropic_key: boolean;
   has_bugzilla_key: boolean;
   max_parallel: number;
-  untriaged_url: string;
+  query_urls: Record<BugQuery, string>;
 }
+
+/** The Bugzilla bug lists runs can be queued from. */
+export type BugQuery = "untriaged" | "open";
 
 export interface ProposedException {
   category: "baseline" | "convenience";
@@ -136,10 +139,11 @@ export interface Review {
   draft: Draft;
 }
 
-export interface UntriagedBug {
+export interface ListedBug {
   id: number;
   summary: string;
   creation_time: string;
+  last_change_time: string;
   url: string;
   status: string;
   whiteboard: string;
@@ -193,7 +197,7 @@ export const api = {
   review: (runId: string) => request<Review>(`${runPath(runId)}/review`),
   apply: (runId: string, body: ApplyRequest) =>
     post<Applied>(`${runPath(runId)}/apply`, body),
-  untriaged: () => request<UntriagedBug[]>("/api/untriaged"),
+  bugs: (query: BugQuery) => request<ListedBug[]>(`/api/bugs/${query}`),
   streamUrl: (runId: string) => `${runPath(runId)}/stream`,
   fileUrl: (runId: string, key: string) => `${runPath(runId)}/files/${key}`,
 };

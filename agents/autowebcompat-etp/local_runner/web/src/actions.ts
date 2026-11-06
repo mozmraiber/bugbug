@@ -1,7 +1,7 @@
 // Everything that changes the store: API calls, the run's event stream, and
 // form edits that need more than a plain field assignment.
 
-import { api, type RunInfo } from "./api";
+import { api, type BugQuery, type RunInfo } from "./api";
 import {
   DEFAULT_OPTIONS,
   store,
@@ -277,10 +277,11 @@ export async function applyActions() {
   }
 }
 
-// --- untriaged bugs dialog: fetch -> select -> queue ------------------------
+// --- queue from a Bugzilla list: fetch -> select -> queue -------------------
 
-export function openTriage() {
+export function openTriage(query: BugQuery) {
   store.triage = {
+    query,
     step: 1,
     bugs: [],
     selected: [],
@@ -288,7 +289,7 @@ export function openTriage() {
     busy: false,
     error: null,
   };
-  fetchUntriaged();
+  fetchBugs();
 }
 
 export function closeTriage() {
@@ -300,12 +301,12 @@ export function triageGoTo(step: TriageStep) {
   store.triage!.step = step;
 }
 
-export async function fetchUntriaged() {
+export async function fetchBugs() {
   const triage = store.triage!;
   triage.busy = true;
   triage.error = null;
   try {
-    const bugs = await api.untriaged();
+    const bugs = await api.bugs(triage.query);
     triage.bugs = bugs;
     triage.selected = bugs.filter((b) => !b.runs.length).map((b) => b.id);
     triage.step = 2;
