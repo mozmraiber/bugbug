@@ -19,7 +19,7 @@ export const DEFAULT_OPTIONS: RunOptions = {
   max_turns: null,
   headless: false,
   mode: "investigate",
-  build: true,
+  build: false,
 };
 
 /** The draft Bugzilla changes for the selected run, edited before posting. */
