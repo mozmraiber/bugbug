@@ -32,7 +32,10 @@ def resolve_bin(bin_name: str) -> str:
 
 
 def build_firefox_devtools_server(
-    firefox_path: Path, *, headless: bool = True
+    firefox_path: Path,
+    *,
+    headless: bool = True,
+    content_blocking_log_file: Path | None = None,
 ) -> McpStdioServerConfig:
     """Build the stdio config for the Firefox DevTools MCP server.
 
@@ -40,6 +43,10 @@ def build_firefox_devtools_server(
     tests candidate exceptions at runtime with ``set_etp_mode`` and
     ``set_firefox_prefs``, and reads the content blocking log with
     ``get_content_blocking_log`` (the ETP tools come from mcp/patch-mcp.mjs).
+
+    If ``content_blocking_log_file`` is given, ``get_content_blocking_log``
+    also appends every log it returns to that JSON file, under the ETP mode
+    last set with ``set_etp_mode``.
     """
     args = [
         "--enable-script",
@@ -54,8 +61,12 @@ def build_firefox_devtools_server(
     if headless:
         args.append("--headless")
 
+    env = {"MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1"}
+    if content_blocking_log_file is not None:
+        env["ETP_CONTENT_BLOCKING_LOG_FILE"] = str(content_blocking_log_file)
+
     return McpStdioServerConfig(
         command=resolve_bin("firefox-devtools-mcp-moz"),
         args=args,
-        env={"MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1"},
+        env=env,
     )

@@ -67,6 +67,10 @@ const ETP_FILTER_LIST_MODES = {
 
 const ETP_MODES = ["standard", "strict", ...Object.keys(ETP_FILTER_LIST_MODES)];
 
+// The mode last set with set_etp_mode, which get_content_blocking_log records
+// its logs under. Firefox starts in Standard.
+let etpCurrentMode = "standard";
+
 const ETP_SET_MODE_SCRIPT = `
   // listUrls is the test_list_urls value for a filter-list mode, else null.
   const [mode, listUrls] = arguments;
@@ -319,6 +323,8 @@ async function handleSetEtpMode(args2) {
       mode,
       filterLists && filterLists.map((list) => list.url).join("|")
     );
+    // The mode's prefs are applied now, even if a later step fails.
+    etpCurrentMode = mode;
     if (filterLists) {
       await etpWaitForFilterLists(filterLists);
     }
@@ -410,6 +416,33 @@ function etpBlockedTrackers(origins) {
   );
 }
 
+// Appends a log to the JSON file named by ETP_CONTENT_BLOCKING_LOG_FILE, under
+// the mode last set with set_etp_mode: { [mode]: [{ time, url, blockedTrackers, origins }, ...] }. The
+// agent then publishes the file with the run, so the full logs don't have to go
+// through its context. Does nothing if the variable isn't set.
+async function etpRecordContentBlockingLog(mode, result, blocked) {
+  const path = process.env.ETP_CONTENT_BLOCKING_LOG_FILE;
+  if (!path) {
+    return;
+  }
+  const { readFile, writeFile } = await import("node:fs/promises");
+  let logs = {};
+  try {
+    logs = JSON.parse(await readFile(path, "utf8"));
+  } catch (e) {
+    if (e.code !== "ENOENT") {
+      throw e;
+    }
+  }
+  (logs[mode] ??= []).push({
+    time: new Date().toISOString(),
+    url: result.url,
+    blockedTrackers: blocked,
+    origins: result.origins,
+  });
+  await writeFile(path, JSON.stringify(logs, null, 2));
+}
+
 async function handleGetContentBlockingLog() {
   try {
     // Async, since getContentBlockingLog() may return a promise.
@@ -420,6 +453,7 @@ async function handleGetContentBlockingLog() {
       throw new Error(result.error);
     }
     const blocked = etpBlockedTrackers(result.origins);
+    await etpRecordContentBlockingLog(etpCurrentMode, result, blocked);
     return successResponse(
       `Content blocking log for ${result.url}:\n` +
         `Blocked trackers: ${blocked.length}` +

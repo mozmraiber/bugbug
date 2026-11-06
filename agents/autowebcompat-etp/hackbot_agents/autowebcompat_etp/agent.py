@@ -65,6 +65,9 @@ SCREENSHOT_FIELDS = {
     "fixed": "screenshot_fixed",
 }
 
+# Where get_content_blocking_log records every log it returns, by ETP mode.
+CONTENT_BLOCKING_LOG_FILE = "content-blocking-log.json"
+
 
 class AutowebcompatEtpResult(EtpInvestigationResult):
     exception_records: list[dict[str, Any]]
@@ -73,6 +76,7 @@ class AutowebcompatEtpResult(EtpInvestigationResult):
     existing_exceptions: list[dict[str, Any]] | None
     existing_shims: list[dict[str, Any]] | None
     screenshot_urls: dict[str, str]
+    content_blocking_log_url: str | None = None
 
     @model_validator(mode="after")
     def validate_blocked_trackers_have_screenshots(self) -> AutowebcompatEtpResult:
@@ -94,6 +98,7 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
         input_data: AutoWebcompatInput,
         bugzilla_mcp_server: McpServerConfig,
         screenshot_dir: Path,
+        content_blocking_log_file: Path | None = None,
     ):
         super().__init__(task_config, run_tracker)
         self.input_data = input_data
@@ -102,7 +107,11 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
         }
         self.add_mcp_server(
             "firefox-devtools",
-            build_firefox_devtools_server(firefox_path, headless=task_config.headless),
+            build_firefox_devtools_server(
+                firefox_path,
+                headless=task_config.headless,
+                content_blocking_log_file=content_blocking_log_file,
+            ),
             DEVTOOLS_TOOLS + PRIVILEGED_TOOLS,
         )
         self.add_mcp_server(
@@ -290,6 +299,13 @@ def publish_screenshots(
     return urls
 
 
+def publish_content_blocking_log(path: Path, publish_file: PublishFile) -> str | None:
+    """Publish the content blocking logs the MCP server recorded, if any."""
+    if not path.is_file():
+        return None
+    return publish_file(CONTENT_BLOCKING_LOG_FILE, path, "application/json")
+
+
 async def run_autowebcompat_etp(
     config: TaskConfig,
     tracker: RunTracker,
@@ -307,6 +323,8 @@ async def run_autowebcompat_etp(
 
         firefox_path = install_firefox_nightly()
         screenshot_dir = Path(tempfile.mkdtemp(prefix="autowebcompat-etp-screenshots-"))
+        log_dir = Path(tempfile.mkdtemp(prefix="autowebcompat-etp-logs-"))
+        content_blocking_log_file = log_dir / CONTENT_BLOCKING_LOG_FILE
         result = await EtpInvestigation(
             config,
             tracker,
@@ -314,6 +332,7 @@ async def run_autowebcompat_etp(
             input_data,
             bugzilla_mcp_server,
             screenshot_dir,
+            content_blocking_log_file,
         ).run()
 
     records = exception_records(result, input_data)
@@ -327,4 +346,7 @@ async def run_autowebcompat_etp(
         existing_exceptions=find_existing_exceptions(records),
         existing_shims=find_existing_shims(result.proposed_shim),
         screenshot_urls=publish_screenshots(result, publish_file),
+        content_blocking_log_url=publish_content_blocking_log(
+            content_blocking_log_file, publish_file
+        ),
     )

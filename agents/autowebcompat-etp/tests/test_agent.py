@@ -2,7 +2,7 @@ from unittest import mock
 
 import requests
 from autowebcompat_tools.inputs import BugDataInput, BugIdInput
-from hackbot_agents.autowebcompat_etp import agent
+from hackbot_agents.autowebcompat_etp import agent, mcp_servers
 from hackbot_agents.autowebcompat_etp.result import (
     PNG_SIGNATURE,
     EtpInvestigationResult,
@@ -119,6 +119,37 @@ def test_publish_screenshots(tmp_path):
         "easylist": "https://x/screenshot-easylist.png",
     }
     publish_file.assert_any_call("screenshot-strict.png", png, "image/png")
+
+
+def test_publish_content_blocking_log(tmp_path):
+    path = tmp_path / agent.CONTENT_BLOCKING_LOG_FILE
+    publish_file = mock.Mock(side_effect=lambda key, path, _: f"https://x/{key}")
+
+    assert agent.publish_content_blocking_log(path, publish_file) is None
+    publish_file.assert_not_called()
+
+    path.write_text('{"strict": []}')
+    assert (
+        agent.publish_content_blocking_log(path, publish_file)
+        == "https://x/content-blocking-log.json"
+    )
+    publish_file.assert_called_once_with(
+        "content-blocking-log.json", path, "application/json"
+    )
+
+
+def test_firefox_devtools_server_passes_log_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_servers, "resolve_bin", lambda name: name)
+    log = tmp_path / "log.json"
+
+    assert (
+        "ETP_CONTENT_BLOCKING_LOG_FILE"
+        not in (mcp_servers.build_firefox_devtools_server(tmp_path)["env"])
+    )
+    server = mcp_servers.build_firefox_devtools_server(
+        tmp_path, content_blocking_log_file=log
+    )
+    assert server["env"]["ETP_CONTENT_BLOCKING_LOG_FILE"] == str(log)
 
 
 def test_final_result_keeps_counts_without_paths(tmp_path):
