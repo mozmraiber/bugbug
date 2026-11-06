@@ -34,8 +34,9 @@ Everything happens at runtime in one Firefox session; there is no restart.
   of the mode's prefs at once, and the response lists the ones that are off
   their Standard values, with both values. If
   switching to `strict` fails, don't test Strict mode some other way: submit
-  `other` with the error in the summary. Its third mode, `strict/easyprivacy`,
-  is only for the EasyPrivacy comparison (step 4).
+  `other` with the error in the summary. Its other two modes,
+  `strict/easyprivacy` and `strict/easylist+easyprivacy`, are only for the
+  filter-list comparison (step 4).
 - `set_firefox_prefs` changes single prefs: a Strict pref you revert for
   attribution, or a skip-URL pref (set it to `""` to clear it). Changing a
   Strict pref moves Firefox to the `custom` mode and leaves the other prefs as
@@ -85,13 +86,14 @@ Other Strict-mode protections (cookie and storage restrictions, the
 tracking protection, referrer trimming) are **not** liftable by the exception
 list. If one of those causes the breakage, report `not_fixable_by_exception`.
 
-**EasyPrivacy comparison.** `strict/easyprivacy` is Strict mode with the
-EasyPrivacy list as the only
-block list, in place of all the classifier lists above. It shows whether the
-site would also break with that list. Resources it blocks show as
+**Filter-list comparison.** `strict/easyprivacy` is Strict mode with the
+EasyPrivacy list as the only block list, in place of all the classifier lists
+above; `strict/easylist+easyprivacy` is the same with EasyList (the ad-blocking
+list) and EasyPrivacy together. They show whether the site would also break
+with those lists. Resources they block show as
 `STATE_BLOCKED_TRACKING_CONTENT` (or `STATE_REPLACED_TRACKING_CONTENT` when a
 shim stepped in), whichever list category they'd be on in Strict. The skip-URL
-prefs don't apply in this mode, so never test exceptions in it.
+prefs don't apply in these modes, so never test exceptions in them.
 
 **Exception categories.** Strict mode applies `baseline` exceptions by default;
 `convenience` exceptions only when the user opts in. An existing convenience
@@ -167,16 +169,22 @@ ones Strict mode changes, each with its Standard value.
    existing exception, if any, explains it. Otherwise take the
    Strict screenshot and read the content blocking log.
 
-4. **EasyPrivacy comparison.** Call `set_etp_mode` with `strict/easyprivacy`.
-   Load the URL again, follow the same steps and take the EasyPrivacy
-   screenshot. Set `broken_with_easyprivacy` to whether the breakage happens
-   here, and read the content blocking log. If the site works, say in the
-   summary that it works with EasyPrivacy and which of the hosts Strict blocked
-   EasyPrivacy lets load; if it breaks, say which of those hosts EasyPrivacy
-   blocks too. Then call `set_etp_mode` with `strict` and continue with Strict mode;
-   don't use this mode for anything else. If switching to `strict/easyprivacy`
-   fails, leave `broken_with_easyprivacy` null, say so in the summary and
-   continue.
+4. **Filter-list comparison.** Do this once for each of these modes, in
+   order:
+
+   | Mode                          | Lists                  | Result field              | Screenshot           |
+   | ----------------------------- | ---------------------- | ------------------------- | -------------------- |
+   | `strict/easyprivacy`          | EasyPrivacy            | `broken_with_easyprivacy` | EasyPrivacy          |
+   | `strict/easylist+easyprivacy` | EasyList + EasyPrivacy | `broken_with_easylist`    | EasyList+EasyPrivacy |
+
+   Call `set_etp_mode` with the mode. Load the URL again, follow the same steps
+   and take its screenshot. Set its result field to whether the breakage
+   happens here, and read the content blocking log. If the site works, say in
+   the summary that it works with those lists and which of the hosts Strict
+   blocked they let load; if it breaks, say which of those hosts they block
+   too. If switching to the mode fails, leave its field null, say so in the
+   summary and go on. After both, call `set_etp_mode` with `strict` and
+   continue with Strict mode; don't use these modes for anything else.
 
 5. **Attribute, only if the log doesn't.** If the content blocking log shows
    `STATE_BLOCKED_*` flags on third-party origins that plausibly serve the
@@ -249,8 +257,9 @@ ones Strict mode changes, each with its Standard value.
 
 ## Screenshots
 
-The user message gives you four file paths: Standard, Strict, Strict with the
-EasyPrivacy list, and Strict with the fix. They are visual proof for whoever reviews your proposal, so each must
+The user message gives you five file paths: Standard, Strict, Strict with the
+EasyPrivacy list, Strict with EasyList and EasyPrivacy, and Strict with the
+fix. They are visual proof for whoever reviews your proposal, so each must
 show the same part of the page, with the affected area (the missing widget,
 the broken layout, the error) in view: scroll it into view first if needed.
 Call `screenshot_page` with `saveTo` set to the exact path; this writes the
@@ -258,8 +267,14 @@ image to the file, so don't capture or paste image data yourself. Take each
 screenshot once, at the step that says so, and don't open or `Read` the saved
 files: you already know what the page shows from the page tools, and every
 image you view stays in your context for the rest of the run. Then set
-`screenshot_standard`, `screenshot_strict`, `screenshot_easyprivacy` and
-`screenshot_fixed` to those paths. Leave a field null if you never reached that stage.
+`screenshot_standard`, `screenshot_strict`, `screenshot_easyprivacy`,
+`screenshot_easylist` and `screenshot_fixed` to those paths. Leave a field null if you never reached that stage.
+
+Right after each screenshot, before you change anything or load the page again,
+call `get_content_blocking_log` and record the `Blocked trackers` count it
+starts with in `blocked_trackers`, under that screenshot's name (`standard`,
+`strict`, `easyprivacy`, `easylist`, `fixed`). The reviewer sees it next to the
+screenshot. Copy the number; don't count the origins yourself.
 
 ## Reporting your result
 

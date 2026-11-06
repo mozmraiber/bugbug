@@ -76,6 +76,7 @@ SCREENSHOT_LABELS = {
     "standard": "Standard ETP",
     "strict": "Strict ETP (broken)",
     "easyprivacy": "Strict ETP with the EasyPrivacy list",
+    "easylist": "Strict ETP with EasyList and EasyPrivacy",
     "fixed": "Strict ETP with the proposed fix",
 }
 
@@ -355,6 +356,11 @@ def draft_comment(result: dict[str, Any]) -> str:
             "- Strict ETP with the EasyPrivacy list instead of the tracker lists: "
             + tri_state(result["broken_with_easyprivacy"])
         )
+    if result.get("broken_with_easylist") is not None:
+        out.append(
+            "- Strict ETP with EasyList and EasyPrivacy instead of the tracker "
+            "lists: " + tri_state(result["broken_with_easylist"])
+        )
     if result.get("failure_reason"):
         out.append(f"- Outcome: `{result['failure_reason']}`")
     else:
@@ -474,6 +480,18 @@ def guess_bug_id(path: Path, result: dict[str, Any] | None = None) -> int | None
     if match := RUN_ID_BUG_RE.match(path.name):
         return int(match.group(1))
     return None
+
+
+def screenshot_labels(result: dict[str, Any] | None) -> dict[str, str]:
+    """The screenshot labels, each with the blocked trackers the agent counted."""
+    counts = (result or {}).get("blocked_trackers") or {}
+    labels = {}
+    for stage, label in SCREENSHOT_LABELS.items():
+        count = counts.get(stage)
+        if count is not None:
+            label += f", {count} blocked tracker{'' if count == 1 else 's'}"
+        labels[stage] = label
+    return labels
 
 
 def combine_screenshots(paths: list[Path], labels: list[str]) -> bytes:
@@ -688,7 +706,7 @@ def review(run_id: str) -> dict[str, Any]:
         "summary": summary,
         "result": result,
         "screenshots": screenshots,
-        "screenshot_labels": SCREENSHOT_LABELS,
+        "screenshot_labels": screenshot_labels(result),
         "has_agent_log": (path / "logs" / "agent.log").is_file(),
         "applied": read_json(path / APPLIED_FILE),
         "draft": {
@@ -744,7 +762,8 @@ def apply(run_id: str, req: ApplyRequest) -> dict[str, Any]:
             done.append({"action": "update_bug", "fields": sorted(body)})
         if req.attachments:
             stages = req.attachments
-            labels = [SCREENSHOT_LABELS.get(stage, stage) for stage in stages]
+            all_labels = screenshot_labels(result)
+            labels = [all_labels.get(stage, stage) for stage in stages]
             png = combine_screenshots(
                 [path / screenshot_keys[stage] for stage in stages], labels
             )

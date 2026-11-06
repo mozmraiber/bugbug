@@ -23,6 +23,7 @@ def make_result(**overrides):
         "broken_in_standard": False,
         "broken_in_strict": True,
         "broken_with_easyprivacy": False,
+        "broken_with_easylist": True,
         "culprit_prefs": ["privacy.trackingprotection.socialtracking.enabled"],
         "blocked_resources": ["https://platform.linkedin.com (socialtracking)"],
         "proposed_exceptions": [PROPOSAL],
@@ -123,18 +124,27 @@ def test_anti_adblock_needs_verified_exceptions():
         make_result(failure_reason="anti_adblock", exception_verified=False)
 
 
-def test_easyprivacy_only_when_strict_is_broken():
+def test_filter_lists_only_when_strict_is_broken():
     make_result(broken_with_easyprivacy=True)
     make_result(
         failure_reason="not_reproducible",
         broken_in_strict=False,
         broken_with_easyprivacy=None,
+        broken_with_easylist=None,
         proposed_exceptions=[],
     )
     with pytest.raises(ValidationError, match="broken_with_easyprivacy"):
         make_result(
             failure_reason="not_reproducible",
             broken_in_strict=False,
+            broken_with_easylist=None,
+            proposed_exceptions=[],
+        )
+    with pytest.raises(ValidationError, match="broken_with_easylist"):
+        make_result(
+            failure_reason="not_reproducible",
+            broken_in_strict=False,
+            broken_with_easyprivacy=None,
             proposed_exceptions=[],
         )
 
@@ -167,3 +177,18 @@ def test_screenshots_must_be_pngs(tmp_path):
         make_result(screenshot_fixed=tmp_path / "missing.png")
     with pytest.raises(ValidationError, match="not a valid PNG"):
         make_result(screenshot_easyprivacy=empty)
+    with pytest.raises(ValidationError, match="not a valid PNG"):
+        make_result(screenshot_easylist=empty)
+
+
+def test_blocked_trackers_only_for_taken_screenshots(tmp_path):
+    png = tmp_path / "strict.png"
+    png.write_bytes(PNG_SIGNATURE)
+    result = make_result(screenshot_strict=png, blocked_trackers={"strict": 7})
+    assert result.blocked_trackers.strict == 7
+    assert make_result().blocked_trackers.strict is None
+
+    with pytest.raises(ValidationError, match="screenshot_fixed is null"):
+        make_result(blocked_trackers={"fixed": 0})
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        make_result(screenshot_strict=png, blocked_trackers={"strict": -1})

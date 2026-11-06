@@ -20,6 +20,7 @@ from autowebcompat_tools.environment import Environment
 from autowebcompat_tools.inputs import AutoWebcompatInput, BugDataInput, BugIdInput
 from autowebcompat_tools.task import RunTracker, Task, TaskConfig
 from claude_agent_sdk import McpServerConfig
+from pydantic import model_validator
 
 from .browser import install_firefox_nightly
 from .config import BUGZILLA_READ_TOOLS, DEVTOOLS_TOOLS, PRIVILEGED_TOOLS
@@ -60,6 +61,7 @@ SCREENSHOT_FIELDS = {
     "standard": "screenshot_standard",
     "strict": "screenshot_strict",
     "easyprivacy": "screenshot_easyprivacy",
+    "easylist": "screenshot_easylist",
     "fixed": "screenshot_fixed",
 }
 
@@ -71,6 +73,12 @@ class AutowebcompatEtpResult(EtpInvestigationResult):
     existing_exceptions: list[dict[str, Any]] | None
     existing_shims: list[dict[str, Any]] | None
     screenshot_urls: dict[str, str]
+
+    @model_validator(mode="after")
+    def validate_blocked_trackers_have_screenshots(self) -> AutowebcompatEtpResult:
+        # The screenshot paths are left out here, and the agent's submission
+        # was already checked against them.
+        return self
 
 
 class EtpInvestigation(Task[EtpInvestigationResult]):
@@ -133,6 +141,7 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
             f"- Standard mode: {paths['standard']}\n"
             f"- Strict mode: {paths['strict']}\n"
             f"- Strict mode with the EasyPrivacy list: {paths['easyprivacy']}\n"
+            f"- Strict mode with EasyList and EasyPrivacy: {paths['easylist']}\n"
             f"- Strict mode with the fix: {paths['fixed']}"
         )
 

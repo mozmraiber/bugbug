@@ -196,6 +196,55 @@ class ProposedShim(BaseModel):
         return self
 
 
+class BlockedTrackers(BaseModel):
+    """The number of blocked trackers at each screenshot, keyed like them."""
+
+    standard: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description="Blocked trackers when you took the Standard screenshot.",
+        ),
+    ] = None
+
+    strict: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description="Blocked trackers when you took the Strict screenshot.",
+        ),
+    ] = None
+
+    easyprivacy: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description=(
+                "Blocked trackers when you took the `strict/easyprivacy` screenshot."
+            ),
+        ),
+    ] = None
+
+    easylist: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description=(
+                "Blocked trackers when you took the `strict/easylist+easyprivacy` "
+                "screenshot."
+            ),
+        ),
+    ] = None
+
+    fixed: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description="Blocked trackers when you took the fixed screenshot.",
+        ),
+    ] = None
+
+
 class EtpInvestigationResult(BaseModel):
     summary: Annotated[
         str,
@@ -290,6 +339,20 @@ class EtpInvestigationResult(BaseModel):
                 "i.e. EasyPrivacy would not have broken it. Null if you didn't "
                 "test it, which includes every run where `broken_in_strict` "
                 "isn't true."
+            ),
+        ),
+    ]
+
+    broken_with_easylist: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "true if the reported breakage also happens in the "
+                "`strict/easylist+easyprivacy` mode (Strict with EasyList and "
+                "EasyPrivacy instead of the tracker lists), false if the site "
+                "works there, i.e. those lists together would not have broken "
+                "it. Null if you didn't test it, which includes every run where "
+                "`broken_in_strict` isn't true."
             ),
         ),
     ]
@@ -430,6 +493,17 @@ class EtpInvestigationResult(BaseModel):
         ),
     ] = None
 
+    screenshot_easylist: Annotated[
+        Path | None,
+        Field(
+            description=(
+                "The exact `saveTo` path you were given for the screenshot in the "
+                "`strict/easylist+easyprivacy` mode. Null if you didn't load the "
+                "page in that mode."
+            ),
+        ),
+    ] = None
+
     screenshot_fixed: Annotated[
         Path | None,
         Field(
@@ -441,10 +515,23 @@ class EtpInvestigationResult(BaseModel):
         ),
     ] = None
 
+    blocked_trackers: Annotated[
+        BlockedTrackers,
+        Field(
+            description=(
+                "For each screenshot you took, the `Blocked trackers` count "
+                "`get_content_blocking_log` reported right after it, under the "
+                "same name as the screenshot field (`strict` for "
+                "`screenshot_strict`). Null for screenshots you didn't take."
+            ),
+        ),
+    ] = BlockedTrackers()
+
     @field_validator(
         "screenshot_standard",
         "screenshot_strict",
         "screenshot_easyprivacy",
+        "screenshot_easylist",
         "screenshot_fixed",
         mode="after",
     )
@@ -493,14 +580,24 @@ class EtpInvestigationResult(BaseModel):
                 "proposed_exceptions and proposed_shim must be empty when "
                 "failure_reason is set to anything but anti_adblock"
             )
-        if (
-            self.broken_with_easyprivacy is not None
-            and self.broken_in_strict is not True
-        ):
-            raise ValueError(
-                "broken_with_easyprivacy must be null unless broken_in_strict is "
-                "true: the EasyPrivacy comparison only runs when Strict is broken"
-            )
+        if self.broken_in_strict is not True:
+            for field in ("broken_with_easyprivacy", "broken_with_easylist"):
+                if getattr(self, field) is not None:
+                    raise ValueError(
+                        f"{field} must be null unless broken_in_strict is true: "
+                        "the filter-list comparison only runs when Strict is "
+                        "broken"
+                    )
         if (self.severity is None) != (self.priority is None):
             raise ValueError("set both severity and priority, or neither")
+        return self
+
+    @model_validator(mode="after")
+    def validate_blocked_trackers_have_screenshots(self) -> EtpInvestigationResult:
+        for stage, count in self.blocked_trackers:
+            if count is not None and getattr(self, f"screenshot_{stage}") is None:
+                raise ValueError(
+                    f"blocked_trackers.{stage} is set, but screenshot_{stage} is "
+                    "null: give the count only for screenshots you took"
+                )
         return self

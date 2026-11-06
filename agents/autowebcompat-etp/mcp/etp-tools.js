@@ -40,23 +40,36 @@ async function etpRunChrome(script, { isAsync = false } = {}, ...scriptArgs) {
   }
 }
 
-const ETP_EASYPRIVACY_MODE = "strict/easyprivacy";
-const ETP_EASYPRIVACY_URL = "https://easylist.to/easylist/easyprivacy.txt";
+// Filter lists the content classifier can block with instead of the tracker
+// lists. `probe` is a URL the list blocks and the other lists don't, so a match
+// shows that this list in particular is loaded.
+const ETP_FILTER_LISTS = {
+  easyprivacy: {
+    name: "EasyPrivacy",
+    url: "https://easylist.to/easylist/easyprivacy.txt",
+    probe: "https://www.google-analytics.com/analytics.js",
+  },
+  easylist: {
+    name: "EasyList",
+    url: "https://easylist.to/easylist/easylist.txt",
+    probe: "https://ib.adnxs.com/ut/v3/prebid",
+  },
+};
 
-// Applies `mode`, then reads the prefs the Strict category controls that are
-// off their Standard values. Standard expects every one of them at its default
-// value, so those are the default-branch values.
-//
-// "strict/easyprivacy" is the Strict category, with blocking done by the
-// content classifier using the EasyPrivacy list instead of the tracker lists.
-// The classifier builds the list given by the protection.test_list_urls pref
-// into its "test_block" engine, and while it is enabled Firefox skips the URL
-// classifier (privacy.trackingprotection.urlclassifier.
-// disable_for_channel_classifier, on by default in Nightly). The other modes
-// clear these prefs, which disables the classifier again: the MCP server starts
-// Firefox with the classifier's pref mirror off, so nothing turns it back on.
+// The modes that block with filter lists, with the lists each one uses.
+const ETP_FILTER_LIST_MODES = {
+  "strict/easyprivacy": [ETP_FILTER_LISTS.easyprivacy],
+  "strict/easylist+easyprivacy": [
+    ETP_FILTER_LISTS.easylist,
+    ETP_FILTER_LISTS.easyprivacy,
+  ],
+};
+
+const ETP_MODES = ["standard", "strict", ...Object.keys(ETP_FILTER_LIST_MODES)];
+
 const ETP_SET_MODE_SCRIPT = `
-  const [mode, easyPrivacyMode, easyPrivacyUrl] = arguments;
+  // listUrls is the test_list_urls value for a filter-list mode, else null.
+  const [mode, listUrls] = arguments;
   const category = "browser.contentblocking.category";
   const CC = "privacy.trackingprotection.content.";
   // The service ignores pref changes until it exists. Getting it creates it,
@@ -77,20 +90,20 @@ const ETP_SET_MODE_SCRIPT = `
   ]) {
     Services.prefs.clearUserPref(CC + p);
   }
-  if (mode === easyPrivacyMode) {
+  if (listUrls !== null) {
     // With the mirror on, switching the category below would overwrite the
     // engines prefs with the tracker-list engines.
     Services.prefs.setIntPref(CC + "mirror.mode", 0);
     Services.prefs.setStringPref(CC + "protection.engines", "test_block");
     Services.prefs.setStringPref(CC + "protection.engines.pbmode", "test_block");
     Services.prefs.setBoolPref(CC + "protection.enabled", true);
-    Services.prefs.setStringPref(CC + "protection.test_list_urls", easyPrivacyUrl);
+    Services.prefs.setStringPref(CC + "protection.test_list_urls", listUrls);
   }
   // ContentBlockingPrefs observes the category pref and synchronously applies
   // the category's prefs.
   Services.prefs.setStringPref(
     category,
-    mode === easyPrivacyMode ? "strict" : mode
+    listUrls !== null ? "strict" : mode
   );
   const { ContentBlockingPrefs } = ChromeUtils.importESModule(
     "moz-src:///browser/components/protections/ContentBlockingPrefs.sys.mjs"
@@ -226,13 +239,10 @@ async function etpEnsureProtectionLists() {
   }
 }
 
-// Reports whether the content classifier's "test_block" engine is built from
-// the EasyPrivacy list, by probing it with a request the list blocks. Until
-// the download finishes the engine doesn't exist (NS_ERROR_NOT_AVAILABLE); if
-// the download fails it is built empty and never matches.
-const ETP_EASYPRIVACY_PROBE_URL =
-  "https://www.google-analytics.com/analytics.js";
-const ETP_EASYPRIVACY_STATUS_SCRIPT = `
+// Reports whether the content classifier's "test_block" engine blocks `url`.
+// Until the downloads finish the engine doesn't exist (NS_ERROR_NOT_AVAILABLE);
+// a list whose download fails is left out of it, so its probe never matches.
+const ETP_PROBE_SCRIPT = `
   const done = arguments[arguments.length - 1];
   const url = arguments[0];
   const service = Cc["@mozilla.org/content-classifier-service;1"].getService(
@@ -258,46 +268,47 @@ const ETP_EASYPRIVACY_STATUS_SCRIPT = `
   }
 `;
 
-// Waits until the content classifier blocks with the EasyPrivacy list. Throws
-// on timeout, which also covers a failed download.
-async function etpWaitForEasyPrivacy() {
+// Waits until the content classifier blocks with each of `lists`. Throws on
+// timeout, which also covers a failed download.
+async function etpWaitForFilterLists(lists) {
   const deadline = Date.now() + ETP_LISTS_TIMEOUT_MS;
-  for (;;) {
-    const status = await etpRunChrome(
-      ETP_EASYPRIVACY_STATUS_SCRIPT,
-      { isAsync: true },
-      ETP_EASYPRIVACY_PROBE_URL
-    );
-    if (status.error) {
-      throw new Error(`Probing the content classifier failed: ${status.error}`);
-    }
-    if (status.ready) {
-      return;
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `Timed out after ${ETP_LISTS_TIMEOUT_MS / 1e3}s waiting for the ` +
-          `content classifier to load the EasyPrivacy list from ` +
-          `${ETP_EASYPRIVACY_URL} (it still doesn't block ` +
-          `${ETP_EASYPRIVACY_PROBE_URL}); the download may have failed.`
+  for (const list of lists) {
+    for (;;) {
+      const status = await etpRunChrome(
+        ETP_PROBE_SCRIPT,
+        { isAsync: true },
+        list.probe
       );
+      if (status.error) {
+        throw new Error(
+          `Probing the content classifier failed: ${status.error}`
+        );
+      }
+      if (status.ready) {
+        break;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out after ${ETP_LISTS_TIMEOUT_MS / 1e3}s waiting for the ` +
+            `content classifier to load the ${list.name} list from ` +
+            `${list.url} (it still doesn't block ${list.probe}); the ` +
+            "download may have failed."
+        );
+      }
+      await new Promise((resolve2) => setTimeout(resolve2, 1e3));
     }
-    await new Promise((resolve2) => setTimeout(resolve2, 1e3));
   }
 }
 
 async function handleSetEtpMode(args2) {
   try {
     const { mode } = args2 || {};
-    if (
-      mode !== "standard" &&
-      mode !== "strict" &&
-      mode !== ETP_EASYPRIVACY_MODE
-    ) {
+    if (!ETP_MODES.includes(mode)) {
       throw new Error(
-        `mode must be "standard", "strict" or "${ETP_EASYPRIVACY_MODE}"`
+        `mode must be one of ${ETP_MODES.map((m) => `"${m}"`).join(", ")}`
       );
     }
+    const filterLists = ETP_FILTER_LIST_MODES[mode] ?? null;
     // Without the lists, Strict mode blocks nothing: make sure they are there
     // before switching, and fail instead of handing back a Strict mode that
     // silently doesn't block.
@@ -306,11 +317,10 @@ async function handleSetEtpMode(args2) {
       ETP_SET_MODE_SCRIPT,
       {},
       mode,
-      ETP_EASYPRIVACY_MODE,
-      ETP_EASYPRIVACY_URL
+      filterLists && filterLists.map((list) => list.url).join("|")
     );
-    if (mode === ETP_EASYPRIVACY_MODE) {
-      await etpWaitForEasyPrivacy();
+    if (filterLists) {
+      await etpWaitForFilterLists(filterLists);
     }
     const { failedFlags } = await etpRunChrome(ETP_CLEAR_DATA_SCRIPT, {
       isAsync: true,
@@ -342,10 +352,11 @@ async function handleSetEtpMode(args2) {
               lists.exceptionList.exceptions
             } ETP exception records.\n`
           : "") +
-        (mode === ETP_EASYPRIVACY_MODE
-          ? `Blocking with the EasyPrivacy list (${ETP_EASYPRIVACY_URL}) in the ` +
-            "content classifier instead of the tracker lists; it is loaded and " +
-            "blocking. Blocked resources show as STATE_BLOCKED_TRACKING_CONTENT " +
+        (filterLists
+          ? `Blocking with ${filterLists
+              .map((list) => `the ${list.name} list (${list.url})`)
+              .join(" and ")} in the content classifier instead of the ` +
+            "tracker lists; they are loaded and blocking. Blocked resources show as STATE_BLOCKED_TRACKING_CONTENT " +
             "(or STATE_REPLACED_TRACKING_CONTENT when shimmed).\n"
           : "") +
         "Cleared cookies, site data and caches, so the next load is a first visit.\n" +
@@ -383,6 +394,22 @@ const ETP_CONTENT_BLOCKING_LOG_SCRIPT = `
     .catch((e) => done({ error: String(e) }));
 `;
 
+// Flags of a tracker request the classifier blocked, or replaced with a shim
+// (which also keeps the tracker from loading). Not mixed-content, Safe Browsing
+// or cookie blocking.
+const ETP_BLOCKED_TRACKER_FLAG_RE =
+  /^STATE_(BLOCKED|REPLACED)_(TRACKING|SOCIALTRACKING|EMAILTRACKING|FINGERPRINTING|CRYPTOMINING)_CONTENT$/;
+
+// The origins in `origins` (as decoded by ETP_CONTENT_BLOCKING_LOG_SCRIPT)
+// with a blocked tracker.
+function etpBlockedTrackers(origins) {
+  return Object.keys(origins).filter((origin) =>
+    origins[origin].some((entry) =>
+      entry.flags.some((flag) => ETP_BLOCKED_TRACKER_FLAG_RE.test(flag))
+    )
+  );
+}
+
 async function handleGetContentBlockingLog() {
   try {
     // Async, since getContentBlockingLog() may return a promise.
@@ -392,8 +419,12 @@ async function handleGetContentBlockingLog() {
     if (result.error) {
       throw new Error(result.error);
     }
+    const blocked = etpBlockedTrackers(result.origins);
     return successResponse(
       `Content blocking log for ${result.url}:\n` +
+        `Blocked trackers: ${blocked.length}` +
+        (blocked.length ? ` (${blocked.join(", ")})` : "") +
+        "\n" +
         JSON.stringify(result.origins, null, 2)
     );
   } catch (error2) {
@@ -488,15 +519,15 @@ var waitForPageLoadTool = {
 var setEtpModeTool = {
   name: "set_etp_mode",
   description:
-    "Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category's prefs at once; the response lists the ones off their Standard values. Also clears all cookies, site data and caches, so the next load is a first visit (logins and site state are lost). Switching to Strict fails with an error if the tracker lists or the ETP exception list can't be downloaded. \"strict/easyprivacy\" is Strict, but blocks with the EasyPrivacy list (via the content classifier) instead of the tracker lists, fingerprinter and cryptominer lists and the ETP exception list; it waits until the list is downloaded and blocking, and fails if it isn't. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
+    'Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category\'s prefs at once; the response lists the ones off their Standard values. Also clears all cookies, site data and caches, so the next load is a first visit (logins and site state are lost). Switching to Strict fails with an error if the tracker lists or the ETP exception list can\'t be downloaded. "strict/easyprivacy" and "strict/easylist+easyprivacy" are Strict, but block with the EasyPrivacy list, or EasyList and EasyPrivacy together (via the content classifier), instead of the tracker lists, fingerprinter and cryptominer lists and the ETP exception list; they wait until the lists are downloaded and blocking, and fail if they aren\'t. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.',
   inputSchema: {
     type: "object",
     properties: {
       mode: {
         type: "string",
-        enum: ["standard", "strict", "strict/easyprivacy"],
+        enum: ETP_MODES,
         description:
-          "ETP category to switch to; strict/easyprivacy is Strict with the EasyPrivacy list as the only block list",
+          "ETP category to switch to; strict/easyprivacy is Strict with the EasyPrivacy list as the only block list, strict/easylist+easyprivacy with EasyList and EasyPrivacy as the only block lists",
       },
     },
     required: ["mode"],
@@ -506,6 +537,6 @@ var setEtpModeTool = {
 var getContentBlockingLogTool = {
   name: "get_content_blocking_log",
   description:
-    "Return the content blocking log of the selected tab: every third-party origin with its STATE_* flags (e.g. STATE_BLOCKED_SOCIALTRACKING_CONTENT names the feature that blocked it). Does not change the selected page. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
+    "Return the content blocking log of the selected tab: every third-party origin with its STATE_* flags (e.g. STATE_BLOCKED_SOCIALTRACKING_CONTENT names the feature that blocked it), headed by the number of blocked trackers: origins with a STATE_BLOCKED_* or STATE_REPLACED_* tracker flag. Does not change the selected page. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.",
   inputSchema: { type: "object", properties: {} },
 };

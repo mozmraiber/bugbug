@@ -17,6 +17,7 @@ def make_result(*proposals):
         broken_in_standard=False,
         broken_in_strict=True,
         broken_with_easyprivacy=None,
+        broken_with_easylist=None,
         culprit_prefs=[],
         blocked_resources=[],
         proposed_exceptions=list(proposals),
@@ -104,6 +105,7 @@ def test_publish_screenshots(tmp_path):
             "screenshot_standard": png,
             "screenshot_strict": png,
             "screenshot_easyprivacy": png,
+            "screenshot_easylist": png,
         }
     )
     publish_file = mock.Mock(side_effect=lambda key, path, _: f"https://x/{key}")
@@ -114,8 +116,31 @@ def test_publish_screenshots(tmp_path):
         "standard": "https://x/screenshot-standard.png",
         "strict": "https://x/screenshot-strict.png",
         "easyprivacy": "https://x/screenshot-easyprivacy.png",
+        "easylist": "https://x/screenshot-easylist.png",
     }
     publish_file.assert_any_call("screenshot-strict.png", png, "image/png")
+
+
+def test_final_result_keeps_counts_without_paths(tmp_path):
+    png = tmp_path / "strict.png"
+    png.write_bytes(PNG_SIGNATURE)
+    result = EtpInvestigationResult.model_validate(
+        make_result(GLOBAL).model_dump()
+        | {"screenshot_strict": png, "blocked_trackers": {"strict": 38}}
+    )
+
+    # As run_autowebcompat_etp builds it, with the paths replaced by URLs.
+    final = agent.AutowebcompatEtpResult(
+        **result.model_dump(exclude=set(agent.SCREENSHOT_FIELDS.values())),
+        exception_records=[],
+        whiteboard_tags=[],
+        user_story_lines=[],
+        existing_exceptions=None,
+        existing_shims=None,
+        screenshot_urls={"strict": "https://x/screenshot-strict.png"},
+    )
+
+    assert final.blocked_trackers.strict == 38
 
 
 SHIMS_JS = """
