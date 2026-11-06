@@ -59,6 +59,7 @@ PublishFile = Callable[[str, Path, str | None], str]
 SCREENSHOT_FIELDS = {
     "standard": "screenshot_standard",
     "strict": "screenshot_strict",
+    "easyprivacy": "screenshot_easyprivacy",
     "fixed": "screenshot_fixed",
 }
 
@@ -131,6 +132,7 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
             "Screenshot paths (pass these exactly as `saveTo`):\n"
             f"- Standard mode: {paths['standard']}\n"
             f"- Strict mode: {paths['strict']}\n"
+            f"- Strict mode with the EasyPrivacy list: {paths['easyprivacy']}\n"
             f"- Strict mode with the fix: {paths['fixed']}"
         )
 

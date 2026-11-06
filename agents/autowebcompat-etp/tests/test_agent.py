@@ -16,6 +16,7 @@ def make_result(*proposals):
         failure_reason=None,
         broken_in_standard=False,
         broken_in_strict=True,
+        broken_with_easyprivacy=None,
         culprit_prefs=[],
         blocked_resources=[],
         proposed_exceptions=list(proposals),
@@ -99,7 +100,11 @@ def test_publish_screenshots(tmp_path):
     png = tmp_path / "strict.png"
     png.write_bytes(PNG_SIGNATURE)
     result = make_result(GLOBAL).model_copy(
-        update={"screenshot_standard": png, "screenshot_strict": png}
+        update={
+            "screenshot_standard": png,
+            "screenshot_strict": png,
+            "screenshot_easyprivacy": png,
+        }
     )
     publish_file = mock.Mock(side_effect=lambda key, path, _: f"https://x/{key}")
 
@@ -108,6 +113,7 @@ def test_publish_screenshots(tmp_path):
     assert urls == {
         "standard": "https://x/screenshot-standard.png",
         "strict": "https://x/screenshot-strict.png",
+        "easyprivacy": "https://x/screenshot-easyprivacy.png",
     }
     publish_file.assert_any_call("screenshot-strict.png", png, "image/png")
 

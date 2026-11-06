@@ -270,6 +270,20 @@ class EtpInvestigationResult(BaseModel):
         ),
     ]
 
+    broken_with_easyprivacy: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "true if the reported breakage also happens in the "
+                "`strict/easyprivacy` mode (Strict with the EasyPrivacy list "
+                "instead of the tracker lists), false if the site works there, "
+                "i.e. EasyPrivacy would not have broken it. Null if you didn't "
+                "test it, which includes every run where `broken_in_strict` "
+                "isn't true."
+            ),
+        ),
+    ]
+
     culprit_prefs: Annotated[
         list[str],
         Field(
@@ -392,6 +406,17 @@ class EtpInvestigationResult(BaseModel):
         ),
     ] = None
 
+    screenshot_easyprivacy: Annotated[
+        Path | None,
+        Field(
+            description=(
+                "The exact `saveTo` path you were given for the screenshot in the "
+                "`strict/easyprivacy` mode. Null if you didn't load the page in "
+                "that mode."
+            ),
+        ),
+    ] = None
+
     screenshot_fixed: Annotated[
         Path | None,
         Field(
@@ -404,7 +429,11 @@ class EtpInvestigationResult(BaseModel):
     ] = None
 
     @field_validator(
-        "screenshot_standard", "screenshot_strict", "screenshot_fixed", mode="after"
+        "screenshot_standard",
+        "screenshot_strict",
+        "screenshot_easyprivacy",
+        "screenshot_fixed",
+        mode="after",
     )
     @classmethod
     def validate_screenshot(cls, path: Path | None) -> Path | None:
@@ -439,6 +468,14 @@ class EtpInvestigationResult(BaseModel):
             raise ValueError(
                 "proposed_exceptions and proposed_shim must be empty when "
                 "failure_reason is set"
+            )
+        if (
+            self.broken_with_easyprivacy is not None
+            and self.broken_in_strict is not True
+        ):
+            raise ValueError(
+                "broken_with_easyprivacy must be null unless broken_in_strict is "
+                "true: the EasyPrivacy comparison only runs when Strict is broken"
             )
         if (self.severity is None) != (self.priority is None):
             raise ValueError("set both severity and priority, or neither")

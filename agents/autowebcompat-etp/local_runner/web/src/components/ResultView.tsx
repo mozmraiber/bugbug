@@ -67,6 +67,8 @@ export function ResultView() {
             {brokenLabel(result.broken_in_standard)} /{" "}
             {brokenLabel(result.broken_in_strict)}
           </dd>
+          <dt>Strict with EasyPrivacy</dt>
+          <dd>{brokenLabel(result.broken_with_easyprivacy ?? null)}</dd>
           <dt>Severity / priority</dt>
           <dd>
             {result.severity ?? "—"} / {result.priority ?? "—"}

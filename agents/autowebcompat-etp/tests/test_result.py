@@ -22,6 +22,7 @@ def make_result(**overrides):
         "failure_reason": None,
         "broken_in_standard": False,
         "broken_in_strict": True,
+        "broken_with_easyprivacy": False,
         "culprit_prefs": ["privacy.trackingprotection.socialtracking.enabled"],
         "blocked_resources": ["https://platform.linkedin.com (socialtracking)"],
         "proposed_exceptions": [PROPOSAL],
@@ -110,6 +111,22 @@ def test_failure_has_no_proposals():
         make_result(failure_reason="other", proposed_exceptions=[], proposed_shim=SHIM)
 
 
+def test_easyprivacy_only_when_strict_is_broken():
+    make_result(broken_with_easyprivacy=True)
+    make_result(
+        failure_reason="not_reproducible",
+        broken_in_strict=False,
+        broken_with_easyprivacy=None,
+        proposed_exceptions=[],
+    )
+    with pytest.raises(ValidationError, match="broken_with_easyprivacy"):
+        make_result(
+            failure_reason="not_reproducible",
+            broken_in_strict=False,
+            proposed_exceptions=[],
+        )
+
+
 def test_shim_unblocks_match_kind():
     with pytest.raises(ValidationError, match="must not be empty"):
         ProposedShim.model_validate(SHIM | {"unblocksOnOptIn": []})
@@ -136,3 +153,5 @@ def test_screenshots_must_be_pngs(tmp_path):
         make_result(screenshot_strict=empty)
     with pytest.raises(ValidationError, match="Cannot read"):
         make_result(screenshot_fixed=tmp_path / "missing.png")
+    with pytest.raises(ValidationError, match="not a valid PNG"):
+        make_result(screenshot_easyprivacy=empty)

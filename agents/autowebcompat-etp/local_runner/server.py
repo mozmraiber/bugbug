@@ -75,6 +75,7 @@ APPLIED_FILE = "runner-applied.json"
 SCREENSHOT_LABELS = {
     "standard": "Standard ETP",
     "strict": "Strict ETP (broken)",
+    "easyprivacy": "Strict ETP with the EasyPrivacy list",
     "fixed": "Strict ETP with the proposed fix",
 }
 
@@ -349,6 +350,11 @@ def draft_comment(result: dict[str, Any]) -> str:
     out += [result.get("summary", "").strip(), ""]
     out.append(f"- Standard ETP: {tri_state(result.get('broken_in_standard'))}")
     out.append(f"- Strict ETP: {tri_state(result.get('broken_in_strict'))}")
+    if result.get("broken_with_easyprivacy") is not None:
+        out.append(
+            "- Strict ETP with the EasyPrivacy list instead of the tracker lists: "
+            + tri_state(result["broken_with_easyprivacy"])
+        )
     if result.get("failure_reason"):
         out.append(f"- Outcome: `{result['failure_reason']}`")
     else:

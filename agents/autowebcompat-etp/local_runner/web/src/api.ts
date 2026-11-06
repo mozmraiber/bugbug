@@ -69,6 +69,7 @@ export interface EtpResult {
   failure_reason: string | null;
   broken_in_standard: boolean | null;
   broken_in_strict: boolean | null;
+  broken_with_easyprivacy?: boolean | null;
   culprit_prefs: string[];
   blocked_resources: string[];
   proposed_exceptions: ProposedException[];
