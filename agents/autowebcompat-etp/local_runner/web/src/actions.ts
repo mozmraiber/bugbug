@@ -158,8 +158,13 @@ async function loadReview(run: RunState) {
       bugId: review.draft.bug_id ? String(review.draft.bug_id) : "",
       comment: review.draft.comment,
       preview: false,
-      changes: JSON.stringify(review.draft.changes),
+      changes: JSON.stringify(
+        exceptionTagsOptional(review.result)
+          ? withoutExceptionTags(review.draft.changes)
+          : review.draft.changes
+      ),
       attachments: [...review.draft.attachments],
+      addExceptions: false,
       force: false,
       busy: false,
       error: null,
@@ -186,6 +191,55 @@ export function toggleAttachment(stage: string, on: boolean) {
   const i = attachments.indexOf(stage);
   if (on && i < 0) attachments.push(stage);
   if (!on && i >= 0) attachments.splice(i, 1);
+}
+
+// The fields that carry the tags the Remote Settings bot adds exceptions from.
+const EXCEPTION_TAG_FIELDS = ["whiteboard", "cf_user_story"];
+
+/**
+ * Whether the reviewer has to opt in to the exception tags: exceptions that
+ * only get around an anti-adblock wall aren't added by default.
+ */
+export function exceptionTagsOptional(
+  result: {
+    failure_reason: string | null;
+    exception_records: readonly unknown[];
+  } | null
+): boolean {
+  return (
+    result?.failure_reason === "anti_adblock" &&
+    result.exception_records.length > 0
+  );
+}
+
+function withoutExceptionTags(changes: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(changes).filter(
+      ([field]) => !EXCEPTION_TAG_FIELDS.includes(field)
+    )
+  );
+}
+
+/** Add the draft's exception tag fields to the field changes, or remove them. */
+export function setAddExceptions(on: boolean) {
+  const { draft } = store.run!.review!;
+  const actions = store.run!.actions!;
+  let changes: Record<string, unknown>;
+  try {
+    changes = JSON.parse(actions.changes || "{}");
+  } catch {
+    actions.error = "Field changes is not valid JSON";
+    return;
+  }
+  changes = withoutExceptionTags(changes);
+  if (on) {
+    for (const field of EXCEPTION_TAG_FIELDS) {
+      if (field in draft.changes) changes[field] = draft.changes[field];
+    }
+  }
+  actions.error = null;
+  actions.addExceptions = on;
+  actions.changes = JSON.stringify(changes);
 }
 
 export async function applyActions() {

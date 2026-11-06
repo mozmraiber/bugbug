@@ -175,7 +175,9 @@ class ProposedShim(BaseModel):
         Field(
             description=(
                 "One or two sentences: why the exception would only be "
-                "`convenience` and why a shim can restore the feature."
+                "`convenience` and why a shim can restore the feature, or for "
+                "`anti_adblock`, what the detection checks and how the shim "
+                "satisfies it."
             ),
         ),
     ]
@@ -215,6 +217,7 @@ class EtpInvestigationResult(BaseModel):
             | Literal["broken_in_standard"]
             | Literal["not_fixable_by_exception"]
             | Literal["exception_not_verified"]
+            | Literal["anti_adblock"]
             | Literal["blocked"]
             | Literal["blocked_captcha"]
             | Literal["blocked_geo"]
@@ -240,6 +243,13 @@ class EtpInvestigationResult(BaseModel):
           fingerprinting protection, query stripping, bounce tracking protection, ...)
           * exception_not_verified - Classifier blocking causes the breakage, but no
           exception you tested fixed it
+          * anti_adblock - The site detects that its ads or trackers are blocked and
+          refuses to work (e.g. a "please disable your ad blocker" wall), and allowing
+          the blocked resources with the skip-URL prefs works around it. If a shim can
+          satisfy the detection while the resources stay blocked (a stub that
+          defines what the detection script checks, e.g. the ad library's globals, or
+          a placeholder in place of the ad), propose that shim; otherwise propose the
+          exceptions, which are only added if a reviewer opts in
           * blocked_captcha - Access to the site was blocked by a captcha
           * blocked_geo - Access to the site was blocked based on location
           * blocked - Access to the site was blocked for some other reason
@@ -314,7 +324,8 @@ class EtpInvestigationResult(BaseModel):
         Field(
             description=(
                 "The smallest set of exceptions that together fix the breakage. "
-                "Empty when `failure_reason` is set or you propose a shim instead."
+                "Empty when you propose a shim instead or `failure_reason` is set to "
+                "anything but `anti_adblock`."
             ),
         ),
     ]
@@ -324,8 +335,8 @@ class EtpInvestigationResult(BaseModel):
         Field(
             description=(
                 "The shim to add instead of exceptions, when the exceptions would "
-                "all be `convenience` and a shim can restore the feature. Null "
-                "otherwise."
+                "all be `convenience` and a shim can restore the feature, or that "
+                "gets around an `anti_adblock` wall. Null otherwise."
             ),
         ),
     ] = None
@@ -464,10 +475,21 @@ class EtpInvestigationResult(BaseModel):
                     "failure_reason must be exception_not_verified (not null) when "
                     "exception_verified is false"
                 )
+        elif self.failure_reason == "anti_adblock":
+            if bool(self.proposed_exceptions) == has_shim:
+                raise ValueError(
+                    "when failure_reason is anti_adblock, propose either exceptions "
+                    "or a shim, not both"
+                )
+            if not self.exception_verified:
+                raise ValueError(
+                    "failure_reason anti_adblock requires exception_verified: report "
+                    "exception_not_verified if no exception you tested fixed it"
+                )
         elif self.proposed_exceptions or has_shim:
             raise ValueError(
                 "proposed_exceptions and proposed_shim must be empty when "
-                "failure_reason is set"
+                "failure_reason is set to anything but anti_adblock"
             )
         if (
             self.broken_with_easyprivacy is not None

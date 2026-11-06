@@ -2,7 +2,12 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSnapshot, type Snapshot } from "valtio";
 
-import { applyActions, toggleAttachment } from "../actions";
+import {
+  applyActions,
+  exceptionTagsOptional,
+  setAddExceptions,
+  toggleAttachment,
+} from "../actions";
 import type { Applied } from "../api";
 import { store } from "../store";
 
@@ -108,6 +113,17 @@ export function ActionsForm() {
           value={snap.changes}
           onChange={(e) => (actions.changes = e.target.value)}
         />
+        {exceptionTagsOptional(run.review.result) && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={snap.addExceptions}
+              onChange={(e) => setAddExceptions(e.target.checked)}
+            />
+            Tag the bug to add the proposed exceptions (they only get around an
+            anti-adblock wall)
+          </label>
+        )}
 
         <label>Attach screenshots</label>
         {stages.length ? (

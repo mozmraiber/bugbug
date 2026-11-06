@@ -28,6 +28,7 @@ export interface ActionsState {
   preview: boolean;
   changes: string;
   attachments: string[];
+  addExceptions: boolean;
   force: boolean;
   busy: boolean;
   error: string | null;
