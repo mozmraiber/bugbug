@@ -10,11 +10,15 @@ export type RunStatus =
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
+/** `retest` reruns an old bug with Firefox's ETP exceptions turned off. */
+export type Mode = "investigate" | "retest";
+
 export interface RunOptions {
   model: string | null;
   effort: Effort | null;
   max_turns: number | null;
   headless: boolean;
+  mode: Mode;
   build: boolean;
 }
 

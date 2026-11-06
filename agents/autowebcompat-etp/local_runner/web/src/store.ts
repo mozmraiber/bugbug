@@ -18,6 +18,7 @@ export const DEFAULT_OPTIONS: RunOptions = {
   effort: null,
   max_turns: null,
   headless: false,
+  mode: "investigate",
   build: true,
 };
 

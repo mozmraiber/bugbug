@@ -11,7 +11,7 @@ from hackbot_runtime import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .agent import AutowebcompatEtpResult, run_autowebcompat_etp
+from .agent import AutowebcompatEtpResult, Mode, run_autowebcompat_etp
 
 logger = logging.getLogger("autowebcompat-etp")
 
@@ -31,6 +31,8 @@ class AgentInputs(BaseSettings):
         | None
     ) = None
     headless: bool = False
+    # `retest` reruns an old bug with Firefox's ETP exceptions turned off.
+    mode: Mode = "investigate"
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -73,6 +75,7 @@ async def main(ctx: HackbotContext) -> AutowebcompatResult:
             "url": inputs.bugzilla_mcp_url,
         },
         publish_file=ctx.publish_file,
+        mode=inputs.mode,
     )
     end_time = datetime.now()
 

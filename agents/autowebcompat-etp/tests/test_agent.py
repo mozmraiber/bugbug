@@ -152,6 +152,45 @@ def test_firefox_devtools_server_passes_log_file(tmp_path, monkeypatch):
     assert server["env"]["ETP_CONTENT_BLOCKING_LOG_FILE"] == str(log)
 
 
+def test_firefox_devtools_server_disables_exceptions(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_servers, "resolve_bin", lambda name: name)
+    prefs = [f"{pref}=false" for pref in mcp_servers.ALLOW_LIST_PREFS]
+
+    server = mcp_servers.build_firefox_devtools_server(tmp_path)
+    assert not set(prefs) & set(server["args"])
+    assert "ETP_DISABLE_EXCEPTIONS" not in server["env"]
+
+    server = mcp_servers.build_firefox_devtools_server(
+        tmp_path, disable_exceptions=True
+    )
+    assert set(prefs) <= set(server["args"])
+    assert server["env"]["ETP_DISABLE_EXCEPTIONS"] == "1"
+
+
+def test_retest_mode_disables_exceptions_and_says_so(tmp_path, monkeypatch):
+    build = mock.Mock(return_value={})
+    monkeypatch.setattr(agent, "build_firefox_devtools_server", build)
+    monkeypatch.setattr(agent, "build_exceptions_server", mock.Mock())
+    monkeypatch.setattr(agent, "build_tracker_lists_server", mock.Mock())
+
+    def investigation(**kwargs):
+        return agent.EtpInvestigation(
+            mock.MagicMock(),
+            mock.Mock(),
+            tmp_path,
+            BugIdInput(bug_id=1),
+            {},
+            tmp_path,
+            **kwargs,
+        )
+
+    assert agent.RETEST_NOTE not in investigation().user_prompt()
+    assert build.call_args.kwargs["disable_exceptions"] is False
+
+    assert agent.RETEST_NOTE in investigation(mode="retest").user_prompt()
+    assert build.call_args.kwargs["disable_exceptions"] is True
+
+
 def test_final_result_keeps_counts_without_paths(tmp_path):
     png = tmp_path / "strict.png"
     png.write_bytes(PNG_SIGNATURE)

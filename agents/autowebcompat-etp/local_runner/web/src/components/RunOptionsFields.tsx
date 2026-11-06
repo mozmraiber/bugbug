@@ -10,7 +10,7 @@ interface Props {
   compact?: boolean;
 }
 
-/** Model / effort / max turns / headless / build, shared by both start flows. */
+/** Model / effort / max turns / headless / mode / build, shared by both start flows. */
 export function RunOptionsFields({
   options,
   buildLabel = "Rebuild image first",
@@ -67,6 +67,16 @@ export function RunOptionsFields({
           onChange={(e) => (options.headless = e.target.checked)}
         />
         Headless Firefox
+      </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={snap.mode === "retest"}
+          onChange={(e) =>
+            (options.mode = e.target.checked ? "retest" : "investigate")
+          }
+        />
+        Retest with ETP exceptions disabled
       </label>
       <label className="check">
         <input

@@ -12,7 +12,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, Literal, get_args
 
 import json5
 import requests
@@ -56,6 +56,22 @@ SHIMS_URL = (
 
 PublishFile = Callable[[str, Path, str | None], str]
 
+# How the harness runs the agent: `investigate` a new report, or `retest` an old
+# one with Firefox's ETP exception list turned off, to see whether the site
+# still breaks without the exceptions it may already have.
+Mode = Literal["investigate", "retest"]
+
+RETEST_NOTE = """\
+This is a retest of an older report. In this Firefox, the ETP exception list is
+disabled in every mode (`set_etp_mode` keeps it off; don't change the
+`privacy.trackingprotection.allow_list.*` prefs): neither `baseline` nor
+`convenience` entries apply, while the skip-URL prefs still work for testing.
+Follow your task procedure as usual. `find_etp_exceptions` still shows the live
+list, so in the summary name the existing entries for this bug or site, and say
+whether the breakage still happens without them (they are still needed) or not
+(the site no longer needs them). In step 3, an existing exception cannot explain
+a site that works here."""
+
 # Screenshot stage -> result field holding the path the agent saved it to.
 SCREENSHOT_FIELDS = {
     "standard": "screenshot_standard",
@@ -77,6 +93,7 @@ class AutowebcompatEtpResult(EtpInvestigationResult):
     existing_shims: list[dict[str, Any]] | None
     screenshot_urls: dict[str, str]
     content_blocking_log_url: str | None = None
+    mode: Mode = "investigate"
 
     @model_validator(mode="after")
     def validate_blocked_trackers_have_screenshots(self) -> AutowebcompatEtpResult:
@@ -99,9 +116,11 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
         bugzilla_mcp_server: McpServerConfig,
         screenshot_dir: Path,
         content_blocking_log_file: Path | None = None,
+        mode: Mode = "investigate",
     ):
         super().__init__(task_config, run_tracker)
         self.input_data = input_data
+        self.mode = mode
         self.screenshot_paths = {
             stage: screenshot_dir / f"{stage}.png" for stage in SCREENSHOT_FIELDS
         }
@@ -111,6 +130,7 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
                 firefox_path,
                 headless=task_config.headless,
                 content_blocking_log_file=content_blocking_log_file,
+                disable_exceptions=mode == "retest",
             ),
             DEVTOOLS_TOOLS + PRIVILEGED_TOOLS,
         )
@@ -143,6 +163,8 @@ class EtpInvestigation(Task[EtpInvestigationResult]):
                 f"The web-compatibility report to work on is Bugzilla bug {self.input_data.bug_id}. "
                 "Fetch it using the Bugzilla MCP tools, then follow your task procedure."
             )
+        if self.mode == "retest":
+            report = f"{report}\n\n{RETEST_NOTE}"
         paths = self.screenshot_paths
         return (
             f"{report}\n\n"
@@ -312,8 +334,11 @@ async def run_autowebcompat_etp(
     input_data: AutoWebcompatInput,
     bugzilla_mcp_server: McpServerConfig,
     publish_file: PublishFile,
+    mode: Mode = "investigate",
 ) -> AutowebcompatEtpResult:
     """Investigate an ETP breakage report and return the proposed fix.
+
+    In `retest` mode, Firefox runs with the ETP exception list turned off.
 
     Raises :class:`AgentError` if the agent ends in an error.
     """
@@ -333,6 +358,7 @@ async def run_autowebcompat_etp(
             bugzilla_mcp_server,
             screenshot_dir,
             content_blocking_log_file,
+            mode,
         ).run()
 
     records = exception_records(result, input_data)
@@ -349,4 +375,5 @@ async def run_autowebcompat_etp(
         content_blocking_log_url=publish_content_blocking_log(
             content_blocking_log_file, publish_file
         ),
+        mode=mode,
     )

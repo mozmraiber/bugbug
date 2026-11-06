@@ -19,6 +19,14 @@ REMOTE_SETTINGS_SERVER = "https://firefox.settings.services.mozilla.com/v1"
 # url-classifier-exceptions list targets.
 CONTENT_CLASSIFIER_MIRROR_PREF = "privacy.trackingprotection.content.mirror.mode=0"
 
+# The prefs that turn on the two categories of url-classifier-exceptions
+# entries. Turning off baseline also turns off convenience, but set both so the
+# prefs say what they mean.
+ALLOW_LIST_PREFS = (
+    "privacy.trackingprotection.allow_list.baseline.enabled",
+    "privacy.trackingprotection.allow_list.convenience.enabled",
+)
+
 
 def resolve_bin(bin_name: str) -> str:
     """Resolve an installed MCP server binary to an absolute path."""
@@ -36,6 +44,7 @@ def build_firefox_devtools_server(
     *,
     headless: bool = True,
     content_blocking_log_file: Path | None = None,
+    disable_exceptions: bool = False,
 ) -> McpStdioServerConfig:
     """Build the stdio config for the Firefox DevTools MCP server.
 
@@ -47,6 +56,10 @@ def build_firefox_devtools_server(
     If ``content_blocking_log_file`` is given, ``get_content_blocking_log``
     also appends every log it returns to that JSON file, under the ETP mode
     last set with ``set_etp_mode``.
+
+    If ``disable_exceptions`` is set, Firefox starts with the ETP exception
+    list off, and ``set_etp_mode`` turns it off again after every switch, since
+    switching the category resets it.
     """
     args = [
         "--enable-script",
@@ -58,10 +71,15 @@ def build_firefox_devtools_server(
         "--pref",
         CONTENT_CLASSIFIER_MIRROR_PREF,
     ]
+    if disable_exceptions:
+        for pref in ALLOW_LIST_PREFS:
+            args += ["--pref", f"{pref}=false"]
     if headless:
         args.append("--headless")
 
     env = {"MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1"}
+    if disable_exceptions:
+        env["ETP_DISABLE_EXCEPTIONS"] = "1"
     if content_blocking_log_file is not None:
         env["ETP_CONTENT_BLOCKING_LOG_FILE"] = str(content_blocking_log_file)
 

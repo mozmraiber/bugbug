@@ -22,6 +22,7 @@ services:
       - MODEL
       - EFFORT
       - MAX_TURNS
+      - MODE
       - BROKER_URL=http://autowebcompat-etp-broker:8765
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?error}
       # No uploader locally: summary/logs/attachments are written under

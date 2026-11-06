@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import requests
 import uvicorn
@@ -175,6 +175,7 @@ class StartRequest(BaseModel):
     effort: str | None = None
     max_turns: int | None = None
     headless: bool = False
+    mode: Literal["investigate", "retest"] = "investigate"
     build: bool = True
 
 
@@ -184,6 +185,7 @@ class BatchRequest(BaseModel):
     effort: str | None = None
     max_turns: int | None = None
     headless: bool = False
+    mode: Literal["investigate", "retest"] = "investigate"
     build: bool = True
 
 
@@ -219,7 +221,7 @@ def compose_cmd(*args: str) -> list[str]:
 def execute(run: Run) -> None:
     params = run.params
     env_args: list[str] = ["-e", f"RUN_ID={run.run_id}"]
-    for name in ("bug_id", "bug_data", "model", "effort", "max_turns"):
+    for name in ("bug_id", "bug_data", "model", "effort", "max_turns", "mode"):
         if params.get(name) not in (None, ""):
             env_args += ["-e", f"{name.upper()}={params[name]}"]
     if params.get("headless"):

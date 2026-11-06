@@ -71,9 +71,14 @@ const ETP_MODES = ["standard", "strict", ...Object.keys(ETP_FILTER_LIST_MODES)];
 // its logs under. Firefox starts in Standard.
 let etpCurrentMode = "standard";
 
+// Set by the harness in retest mode: keep the ETP exception list (both its
+// baseline and convenience entries) off, so old bugs are tested against the
+// bare lists. Skip-URL prefs still apply; they aren't part of either category.
+const ETP_DISABLE_EXCEPTIONS = process.env.ETP_DISABLE_EXCEPTIONS === "1";
+
 const ETP_SET_MODE_SCRIPT = `
   // listUrls is the test_list_urls value for a filter-list mode, else null.
-  const [mode, listUrls] = arguments;
+  const [mode, listUrls, disableExceptions] = arguments;
   const category = "browser.contentblocking.category";
   const CC = "privacy.trackingprotection.content.";
   // The service ignores pref changes until it exists. Getting it creates it,
@@ -109,6 +114,17 @@ const ETP_SET_MODE_SCRIPT = `
     category,
     listUrls !== null ? "strict" : mode
   );
+  // Switching the category resets these (Strict turns baseline on, Standard
+  // clears both), so turn them off again after it. ContentBlockingPrefs
+  // ignores them when matching the category, which stays as set above.
+  if (disableExceptions) {
+    for (const c of ["baseline", "convenience"]) {
+      Services.prefs.setBoolPref(
+        "privacy.trackingprotection.allow_list." + c + ".enabled",
+        false
+      );
+    }
+  }
   const { ContentBlockingPrefs } = ChromeUtils.importESModule(
     "moz-src:///browser/components/protections/ContentBlockingPrefs.sys.mjs"
   );
@@ -321,7 +337,8 @@ async function handleSetEtpMode(args2) {
       ETP_SET_MODE_SCRIPT,
       {},
       mode,
-      filterLists && filterLists.map((list) => list.url).join("|")
+      filterLists && filterLists.map((list) => list.url).join("|"),
+      ETP_DISABLE_EXCEPTIONS
     );
     // The mode's prefs are applied now, even if a later step fails.
     etpCurrentMode = mode;
@@ -351,6 +368,10 @@ async function handleSetEtpMode(args2) {
               .join("\n") +
             "\n"
           : "All of its prefs are at their Standard values.\n") +
+        (ETP_DISABLE_EXCEPTIONS
+          ? "The ETP exception list is disabled (baseline and convenience), " +
+            "as in every mode of this run.\n"
+          : "") +
         (lists
           ? `Tracker lists updated ${new Date(
               Number(lists.lists.lastUpdate)
