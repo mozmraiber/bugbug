@@ -130,6 +130,13 @@ export interface Draft {
   resolution: Resolution | null;
   /** Whether "close the bug" starts ticked. */
   close: boolean;
+  /** The bug's reporter, who can be needinfo'd to confirm a fix. */
+  reporter: string | null;
+  /**
+   * Whether the outcome calls for needinfo'ing the reporter. Not when the
+   * exception tags are added: deploying the exceptions needinfos them later.
+   */
+  needinfo: boolean;
 }
 
 /** The resolutions the bug can be closed with (DUPLICATE needs a dup_id). */
@@ -171,6 +178,7 @@ export interface ApplyRequest {
   changes: Record<string, unknown>;
   attachments: string[];
   resolution: Resolution | null;
+  needinfo: string | null;
   force: boolean;
 }
 

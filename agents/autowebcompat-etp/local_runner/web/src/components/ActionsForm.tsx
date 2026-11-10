@@ -163,6 +163,20 @@ export function ActionsForm() {
           </select>
         </label>
 
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={snap.needinfo}
+            disabled={!run.review.draft.reporter}
+            onChange={(e) => (actions.needinfo = e.target.checked)}
+          />
+          Needinfo the reporter
+          {run.review.draft.reporter
+            ? ` (${run.review.draft.reporter})`
+            : " (unknown)"}{" "}
+          to confirm the issue is fixed
+        </label>
+
         {applied && (
           <label className="check">
             <input
