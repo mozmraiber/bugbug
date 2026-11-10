@@ -5,6 +5,7 @@ import { proxy } from "valtio";
 
 import type {
   Applied,
+  BugDraft,
   Config,
   Review,
   RunInfo,
@@ -30,6 +31,8 @@ export interface ActionsState {
   comment: string;
   preview: boolean;
   changes: string;
+  /** Loaded after the review, as it needs Bugzilla; null while it loads. */
+  bugDraft: BugDraft | null;
   attachments: string[];
   addExceptions: boolean;
   close: boolean;

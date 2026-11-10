@@ -1,7 +1,13 @@
 // Everything that changes the store: API calls, the run's event stream, and
 // form edits that need more than a plain field assignment.
 
-import { api, type BugQuery, type Review, type RunInfo } from "./api";
+import {
+  api,
+  type BugDraft,
+  type BugQuery,
+  type Review,
+  type RunInfo,
+} from "./api";
 import {
   DEFAULT_OPTIONS,
   store,
@@ -145,11 +151,8 @@ async function loadReview(run: RunState) {
       bugId: review.draft.bug_id ? String(review.draft.bug_id) : "",
       comment: review.draft.comment,
       preview: false,
-      changes: JSON.stringify(
-        exceptionTagsOptional(review.result)
-          ? withoutExceptionTags(review.draft.changes)
-          : review.draft.changes
-      ),
+      changes: "",
+      bugDraft: review.result ? null : { changes: {}, reporter: null },
       attachments: [...review.draft.attachments],
       addExceptions: false,
       close: review.draft.close,
@@ -163,6 +166,25 @@ async function loadReview(run: RunState) {
       whoamiError: null,
     };
     const actions = run.actions;
+    if (!actions.bugDraft) {
+      api.bugDraft(run.runId).then(
+        (bugDraft) => {
+          actions.bugDraft = bugDraft;
+          // Unless the reviewer has started typing their own.
+          if (!actions.changes) {
+            actions.changes = JSON.stringify(
+              exceptionTagsOptional(review.result)
+                ? withoutExceptionTags(bugDraft.changes)
+                : bugDraft.changes
+            );
+          }
+        },
+        (err) => {
+          actions.bugDraft = { changes: {}, reporter: null };
+          actions.error = `Could not load the bug's fields: ${message(err)}`;
+        }
+      );
+    }
     if (!actions.whoami && review.result) {
       api.whoami().then(
         (who) => (actions.whoami = who),
@@ -175,6 +197,18 @@ async function loadReview(run: RunState) {
 }
 
 // --- Bugzilla actions -------------------------------------------------------
+
+/**
+ * The reporter to needinfo, if known. The reporter is the drafted bug's, so
+ * not once the bug ID has been changed to another bug.
+ */
+export function needinfoReporter(
+  actions: { bugId: string; bugDraft: BugDraft | null },
+  review: { draft: { bug_id: number | null } }
+): string | null {
+  if (actions.bugId !== String(review.draft.bug_id)) return null;
+  return actions.bugDraft?.reporter ?? null;
+}
 
 export function toggleAttachment(stage: string, on: boolean) {
   const { attachments } = store.run!.actions!;
@@ -218,13 +252,13 @@ function defaultNeedinfo(review: Review, addExceptions: boolean): boolean {
   const tagsAdded =
     !!review.result?.exception_records.length &&
     (!exceptionTagsOptional(review.result) || addExceptions);
-  return review.draft.needinfo && !!review.draft.reporter && !tagsAdded;
+  return review.draft.needinfo && !tagsAdded;
 }
 
 /** Add the draft's exception tag fields to the field changes, or remove them. */
 export function setAddExceptions(on: boolean) {
-  const { draft } = store.run!.review!;
   const actions = store.run!.actions!;
+  const draft = actions.bugDraft?.changes ?? {};
   let changes: Record<string, unknown>;
   try {
     changes = JSON.parse(actions.changes || "{}");
@@ -235,7 +269,7 @@ export function setAddExceptions(on: boolean) {
   changes = withoutExceptionTags(changes);
   if (on) {
     for (const field of EXCEPTION_TAG_FIELDS) {
-      if (field in draft.changes) changes[field] = draft.changes[field];
+      if (field in draft) changes[field] = draft[field];
     }
   }
   actions.error = null;
@@ -260,7 +294,7 @@ export async function applyActions() {
     return;
   }
   const fields = Object.keys(changes);
-  const reporter = run.review!.draft.reporter;
+  const reporter = needinfoReporter(actions, run.review!);
   const needinfo = actions.needinfo && reporter ? reporter : null;
   const parts = [
     actions.comment.trim() && "a comment",

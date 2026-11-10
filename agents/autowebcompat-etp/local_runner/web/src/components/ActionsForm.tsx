@@ -5,6 +5,7 @@ import { useSnapshot, type Snapshot } from "valtio";
 import {
   applyActions,
   exceptionTagsOptional,
+  needinfoReporter,
   setAddExceptions,
   toggleAttachment,
 } from "../actions";
@@ -30,6 +31,7 @@ export function ActionsForm() {
   if (!run?.review || !config) return null;
   const { screenshots, screenshot_labels, applied } = run.review;
   const stages = Object.keys(screenshots);
+  const reporter = needinfoReporter(snap, run.review);
 
   return (
     <>
@@ -111,6 +113,9 @@ export function ActionsForm() {
         <textarea
           rows={3}
           value={snap.changes}
+          placeholder={
+            snap.bugDraft ? undefined : "Drafting from the bug's fields…"
+          }
           onChange={(e) => (actions.changes = e.target.value)}
         />
         {exceptionTagsOptional(run.review.result) && (
@@ -118,6 +123,7 @@ export function ActionsForm() {
             <input
               type="checkbox"
               checked={snap.addExceptions}
+              disabled={!snap.bugDraft}
               onChange={(e) => setAddExceptions(e.target.checked)}
             />
             Tag the bug to add the proposed exceptions (they only get around an
@@ -166,15 +172,18 @@ export function ActionsForm() {
         <label className="check">
           <input
             type="checkbox"
-            checked={snap.needinfo}
-            disabled={!run.review.draft.reporter}
+            checked={snap.needinfo && !!reporter}
+            disabled={!reporter}
             onChange={(e) => (actions.needinfo = e.target.checked)}
           />
-          Needinfo the reporter
-          {run.review.draft.reporter
-            ? ` (${run.review.draft.reporter})`
-            : " (unknown)"}{" "}
-          to confirm the issue is fixed
+          Needinfo the reporter (
+          {reporter ??
+            (!snap.bugDraft
+              ? "looking up…"
+              : snap.bugId !== String(run.review.draft.bug_id)
+                ? `only for bug ${run.review.draft.bug_id}`
+                : "unknown")}
+          ) to confirm the issue is fixed
         </label>
 
         {applied && (
@@ -191,7 +200,7 @@ export function ActionsForm() {
         <p>
           <button
             onClick={applyActions}
-            disabled={snap.busy || (!!applied && !snap.force)}
+            disabled={snap.busy || !snap.bugDraft || (!!applied && !snap.force)}
           >
             Post to Bugzilla
           </button>

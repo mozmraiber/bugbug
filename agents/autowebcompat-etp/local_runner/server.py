@@ -481,26 +481,11 @@ def draft_outcome_actions(result: dict[str, Any] | None) -> OutcomeActions:
     return OUTCOME_ACTIONS.get(reason, OutcomeActions())
 
 
-def bug_reporter(bug_id: int | None) -> str | None:
-    if not bug_id:
-        return None
-    try:
-        bug = bugzilla(
-            "GET",
-            f"bug/{bug_id}",
-            params={"include_fields": "creator"},
-            auth_required=False,
-        )["bugs"][0]
-    except HTTPException, requests.RequestException, KeyError, IndexError:
-        return None
-    return bug.get("creator")
-
-
 EXCEPTION_CATEGORY_TAG_RE = re.compile(r"\[exception-(baseline|convenience)\]")
 DIAGNOSIS_LINE_PREFIXES = ("trackers-blocked:", "classifier-features:")
 
 
-def draft_changes(result: dict[str, Any], bug_id: int | None) -> dict[str, Any]:
+def draft_changes(result: dict[str, Any], bug: dict[str, Any]) -> dict[str, Any]:
     """Field edits that add the agent's diagnosis tags and triage.
 
     Bugzilla replaces the whiteboard and user story whole, so the tags are
@@ -514,19 +499,8 @@ def draft_changes(result: dict[str, Any], bug_id: int | None) -> dict[str, Any]:
         for field in ("severity", "priority")
         if (value := result.get(field))
     }
-    if not bug_id or not (tags or lines or triage):
+    if not (tags or lines or triage):
         return {}
-    try:
-        bug = bugzilla(
-            "GET",
-            f"bug/{bug_id}",
-            params={"include_fields": "whiteboard,cf_user_story,severity,priority"},
-            auth_required=False,
-        )["bugs"][0]
-    except HTTPException, requests.RequestException, KeyError, IndexError:
-        # Without the current values, a draft would clobber the fields.
-        return {}
-
     changes = {
         field: value for field, value in triage.items() if bug.get(field) == "--"
     }
@@ -813,14 +787,35 @@ def review(run_id: str) -> dict[str, Any]:
         "draft": {
             "bug_id": bug_id,
             "comment": draft_comment(result) if result else "",
-            "changes": draft_changes(result, bug_id) if result else {},
             "resolution": outcome.resolution,
             "close": outcome.close,
-            "reporter": bug_reporter(bug_id),
             "needinfo": outcome.needinfo,
             "attachments": list(screenshots),
         },
     }
+
+
+# Separate from the review, which it would slow down: the draft field changes
+# and the reporter need the bug's current fields from Bugzilla.
+@app.get("/api/runs/{run_id}/bug-draft")
+def bug_draft(run_id: str) -> dict[str, Any]:
+    path = run_dir(run_id)
+    summary = read_json(path / "summary.json")
+    if summary is None:
+        raise HTTPException(404, "no summary.json yet")
+    result = (summary.get("findings") or {}).get("result")
+    bug_id = guess_bug_id(path, result)
+    if not result or not bug_id:
+        return {"changes": {}, "reporter": None}
+    bugs = bugzilla(
+        "GET",
+        f"bug/{bug_id}",
+        params={"include_fields": "whiteboard,cf_user_story,severity,priority,creator"},
+        auth_required=False,
+    ).get("bugs")
+    if not bugs:
+        raise HTTPException(404, f"bug {bug_id} not found")
+    return {"changes": draft_changes(result, bugs[0]), "reporter": bugs[0]["creator"]}
 
 
 @app.get("/api/runs/{run_id}/files/{key:path}")

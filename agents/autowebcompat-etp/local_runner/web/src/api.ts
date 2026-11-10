@@ -125,13 +125,10 @@ export interface Applied {
 export interface Draft {
   bug_id: number | null;
   comment: string;
-  changes: Record<string, unknown>;
   attachments: string[];
   resolution: Resolution | null;
   /** Whether "close the bug" starts ticked. */
   close: boolean;
-  /** The bug's reporter, who can be needinfo'd to confirm a fix. */
-  reporter: string | null;
   /**
    * Whether the outcome calls for needinfo'ing the reporter. Not when the
    * exception tags are added: deploying the exceptions needinfos them later.
@@ -150,6 +147,13 @@ export const RESOLUTIONS = [
 ] as const;
 
 export type Resolution = (typeof RESOLUTIONS)[number];
+
+/** The parts of the draft that need the bug's current fields from Bugzilla. */
+export interface BugDraft {
+  changes: Record<string, unknown>;
+  /** The reporter, who can be needinfo'd to confirm a fix. */
+  reporter: string | null;
+}
 
 export interface Review {
   summary: Summary;
@@ -219,6 +223,7 @@ export const api = {
     post<RunInfo[]>("/api/runs/batch", body),
   cancel: (runId: string) => post<RunInfo>(`${runPath(runId)}/cancel`),
   review: (runId: string) => request<Review>(`${runPath(runId)}/review`),
+  bugDraft: (runId: string) => request<BugDraft>(`${runPath(runId)}/bug-draft`),
   apply: (runId: string, body: ApplyRequest) =>
     post<Applied>(`${runPath(runId)}/apply`, body),
   bugs: (query: BugQuery) => request<ListedBug[]>(`/api/bugs/${query}`),
