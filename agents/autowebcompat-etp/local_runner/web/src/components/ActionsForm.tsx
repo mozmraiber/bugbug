@@ -8,7 +8,7 @@ import {
   setAddExceptions,
   toggleAttachment,
 } from "../actions";
-import type { Applied } from "../api";
+import { RESOLUTIONS, type Applied, type Resolution } from "../api";
 import { store } from "../store";
 
 function describe(applied: Snapshot<Applied>): string {
@@ -140,6 +140,28 @@ export function ActionsForm() {
         ) : (
           <div className="meta">No screenshots.</div>
         )}
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={snap.close}
+            onChange={(e) => (actions.close = e.target.checked)}
+          />
+          Close the bug as RESOLVED{" "}
+          <select
+            value={snap.resolution}
+            onChange={(e) =>
+              (actions.resolution = e.target.value as Resolution)
+            }
+          >
+            {RESOLUTIONS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+                {r === run.review!.draft.resolution ? " (suggested)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
 
         {applied && (
           <label className="check">

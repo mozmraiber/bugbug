@@ -209,6 +209,8 @@ class ApplyRequest(BaseModel):
     comment: str = ""
     changes: dict[str, Any] = {}
     attachments: list[str] = []
+    # Close the bug as RESOLVED with this resolution.
+    resolution: str | None = None
     force: bool = False
 
 
@@ -424,6 +426,28 @@ def draft_comment(result: dict[str, Any]) -> str:
     if steps := result.get("steps"):
         out += ["", "**Steps**", "", steps.strip()]
     return "\n".join(out).strip() + "\n"
+
+
+# The resolution to suggest when closing the bug, by the agent's
+# failure_reason, and whether "close the bug" starts ticked. Outcomes that
+# still need work (a fix to land, more investigation) have none.
+RESOLUTIONS: dict[str, tuple[str, bool]] = {
+    "not_etp": ("INVALID", False),
+    "not_reproducible": ("WORKSFORME", True),
+    "fixed_by_list_update": ("WORKSFORME", True),
+    "broken_in_standard": ("INVALID", True),
+    # Left open while the reviewer decides whether to add the exceptions.
+    "anti_adblock": ("WONTFIX", False),
+    "blocked": ("INCOMPLETE", False),
+    "blocked_captcha": ("INCOMPLETE", False),
+    "blocked_geo": ("INCOMPLETE", False),
+    "login": ("INCOMPLETE", False),
+    "down": ("INCOMPLETE", False),
+}
+
+
+def draft_resolution(result: dict[str, Any] | None) -> tuple[str | None, bool]:
+    return RESOLUTIONS.get((result or {}).get("failure_reason") or "", (None, False))
 
 
 EXCEPTION_CATEGORY_TAG_RE = re.compile(r"\[exception-(baseline|convenience)\]")
@@ -732,6 +756,7 @@ def review(run_id: str) -> dict[str, Any]:
         if (path / key).is_file()
     }
     bug_id = guess_bug_id(path, result)
+    resolution, close = draft_resolution(result)
     return {
         "summary": summary,
         "result": result,
@@ -743,6 +768,8 @@ def review(run_id: str) -> dict[str, Any]:
             "bug_id": bug_id,
             "comment": draft_comment(result) if result else "",
             "changes": draft_changes(result, bug_id) if result else {},
+            "resolution": resolution,
+            "close": close,
             "attachments": list(screenshots),
         },
     }
@@ -777,6 +804,8 @@ def apply(run_id: str, req: ApplyRequest) -> dict[str, Any]:
         "error": None,
     }
     body = dict(req.changes)
+    if req.resolution:
+        body |= {"status": "RESOLVED", "resolution": req.resolution}
     comment = req.comment if req.comment.strip() else None
     # The comment rides on the screenshot attachment, so the image shows in
     # the same post; without one it goes in with the field changes.

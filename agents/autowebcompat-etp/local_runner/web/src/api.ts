@@ -127,7 +127,22 @@ export interface Draft {
   comment: string;
   changes: Record<string, unknown>;
   attachments: string[];
+  resolution: Resolution | null;
+  /** Whether "close the bug" starts ticked. */
+  close: boolean;
 }
+
+/** The resolutions the bug can be closed with (DUPLICATE needs a dup_id). */
+export const RESOLUTIONS = [
+  "FIXED",
+  "INVALID",
+  "WONTFIX",
+  "INACTIVE",
+  "WORKSFORME",
+  "INCOMPLETE",
+] as const;
+
+export type Resolution = (typeof RESOLUTIONS)[number];
 
 export interface Review {
   summary: Summary;
@@ -155,6 +170,7 @@ export interface ApplyRequest {
   comment: string;
   changes: Record<string, unknown>;
   attachments: string[];
+  resolution: Resolution | null;
   force: boolean;
 }
 

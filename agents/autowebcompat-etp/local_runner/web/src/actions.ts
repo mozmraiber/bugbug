@@ -152,6 +152,8 @@ async function loadReview(run: RunState) {
       ),
       attachments: [...review.draft.attachments],
       addExceptions: false,
+      close: review.draft.close,
+      resolution: review.draft.resolution ?? "INVALID",
       force: false,
       busy: false,
       error: null,
@@ -250,6 +252,7 @@ export async function applyActions() {
     fields.length && `field changes (${fields.join(", ")})`,
     actions.attachments.length &&
       `${actions.attachments.length} screenshot(s) combined into one image`,
+    actions.close && `close as RESOLVED ${actions.resolution}`,
   ].filter(Boolean);
   if (!parts.length) {
     actions.error = "Nothing to post";
@@ -265,6 +268,7 @@ export async function applyActions() {
       comment: actions.comment,
       changes,
       attachments: [...actions.attachments],
+      resolution: actions.close ? actions.resolution : null,
       force: actions.force,
     });
     actions.force = false;

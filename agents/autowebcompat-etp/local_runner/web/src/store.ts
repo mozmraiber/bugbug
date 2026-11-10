@@ -11,6 +11,7 @@ import type {
   RunOptions,
   BugQuery,
   ListedBug,
+  Resolution,
   WhoAmI,
 } from "./api";
 
@@ -31,6 +32,8 @@ export interface ActionsState {
   changes: string;
   attachments: string[];
   addExceptions: boolean;
+  close: boolean;
+  resolution: Resolution;
   force: boolean;
   busy: boolean;
   error: string | null;
