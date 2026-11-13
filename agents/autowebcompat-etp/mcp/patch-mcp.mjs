@@ -76,7 +76,8 @@ insert(
   `
       ["set_etp_mode", handleSetEtpMode],
       ["get_content_blocking_log", handleGetContentBlockingLog],
-      ["wait_for_page_load", handleWaitForPageLoad],`
+      ["wait_for_page_load", handleWaitForPageLoad],
+      ["screenshot_full_page", handleScreenshotFullPage],`
 );
 // Definitions, in the privileged block of the advertised tool list.
 insert(
@@ -84,6 +85,7 @@ insert(
   `      setEtpModeTool,
       getContentBlockingLogTool,
       waitForPageLoadTool,
+      screenshotFullPageTool,
 `
 );
 

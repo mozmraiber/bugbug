@@ -65,7 +65,15 @@ const ETP_FILTER_LIST_MODES = {
   ],
 };
 
-const ETP_MODES = ["standard", "strict", ...Object.keys(ETP_FILTER_LIST_MODES)];
+// "off" is Standard with every classifier blocking feature turned off, so no
+// tracker is blocked at all: Standard still blocks fingerprinters and
+// cryptominers in normal windows.
+const ETP_MODES = [
+  "off",
+  "standard",
+  "strict",
+  ...Object.keys(ETP_FILTER_LIST_MODES),
+];
 
 // The mode last set with set_etp_mode, which get_content_blocking_log records
 // its logs under. Firefox starts in Standard.
@@ -112,8 +120,22 @@ const ETP_SET_MODE_SCRIPT = `
   // the category's prefs.
   Services.prefs.setStringPref(
     category,
-    listUrls !== null ? "strict" : mode
+    listUrls !== null ? "strict" : mode === "off" ? "standard" : mode
   );
+  // Turning these off moves the category to "custom".
+  if (mode === "off") {
+    for (const p of [
+      "privacy.trackingprotection.enabled",
+      "privacy.trackingprotection.pbmode.enabled",
+      "privacy.trackingprotection.socialtracking.enabled",
+      "privacy.trackingprotection.cryptomining.enabled",
+      "privacy.trackingprotection.fingerprinting.enabled",
+      "privacy.trackingprotection.emailtracking.enabled",
+      "privacy.trackingprotection.emailtracking.pbmode.enabled",
+    ]) {
+      Services.prefs.setBoolPref(p, false);
+    }
+  }
   // Switching the category resets these (Strict turns baseline on, Standard
   // clears both), so turn them off again after it. ContentBlockingPrefs
   // ignores them when matching the category, which stays as set above.
@@ -552,6 +574,451 @@ async function handleWaitForPageLoad(args2) {
   }
 }
 
+// screenshot_page captures only the viewport (WebDriver's Take Screenshot).
+// screenshot_full_page captures the whole page for the comparison agent,
+// which diffs it between ETP modes, by stitching viewport screenshots:
+//
+// 1. Scroll down one viewport at a time and back to the top, so content that
+//    only loads once scrolled into view (lazy images, ads, feeds) loads and
+//    the page height settles before the capture.
+// 2. Capture the top viewport as the user sees it.
+// 3. Hide fixed elements and make sticky ones non-sticky (same layout), so
+//    headers and banners don't repeat in every slice, then capture slices
+//    from the top, each overlapping the previous one by `overlap` px. Each
+//    slice is captured while it is in view, so pages that unload content out
+//    of view (virtualized lists) still show it.
+// 4. Stitch in a chrome canvas: check each slice's overlap against the
+//    previous one and, if the page moved in between, place it at the offset
+//    where the rows match. The top viewport from step 2 goes on top.
+//
+// Every step is its own short command, since the bundle aborts BiDi commands
+// after 10s. Scrolling stops at the bottom or at maxHeight, and the image is
+// cut off there too, so an endless feed doesn't scroll or grow forever.
+const ETP_PAGE_METRICS = `JSON.stringify({
+  y: window.scrollY,
+  viewport: window.innerHeight,
+  height: Math.max(
+    document.documentElement.scrollHeight,
+    document.body?.scrollHeight ?? 0
+  ),
+})`;
+
+const etpScrollExpression = (statement) =>
+  `(() => { ${statement}; return ${ETP_PAGE_METRICS}; })()`;
+
+// Hides fixed elements and makes sticky ones non-sticky. Hides with opacity,
+// not visibility, which a descendant can turn back on with
+// `visibility: visible`. Incremental: it
+// runs before every slice, since pages make elements fixed once scrolled
+// (floating players, "back to top" buttons), and only touches elements it
+// hasn't already. Covers open shadow roots, and fixed or sticky ::before and
+// ::after, which it switches with an attribute and a stylesheet rule as
+// pseudo-elements have no inline style. Runs in a sandbox, so the page's
+// scripts can't see or undo it. Returns how many elements it has pinned.
+const ETP_PIN_OVERLAYS_EXPRESSION = `(() => {
+  const state = (window.__etpPinned ??= {
+    styles: [],
+    pseudos: [],
+    seen: new WeakSet(),
+    sheet: null,
+  });
+  const fix = { fixed: ["opacity", "0"], sticky: ["position", "relative"] };
+  const visit = (root) => {
+    for (const el of root.querySelectorAll("*")) {
+      if (el.shadowRoot) visit(el.shadowRoot);
+      if (state.seen.has(el)) continue;
+      const pinned = fix[getComputedStyle(el).position];
+      if (pinned) {
+        const [prop, value] = pinned;
+        state.styles.push([el, prop, el.style.getPropertyValue(prop),
+          el.style.getPropertyPriority(prop)]);
+        el.style.setProperty(prop, value, "important");
+        state.seen.add(el);
+      }
+      for (const pseudo of ["before", "after"]) {
+        const position = getComputedStyle(el, "::" + pseudo).position;
+        if (fix[position] && !el.hasAttribute("data-etp-pin-" + pseudo)) {
+          el.setAttribute("data-etp-pin-" + pseudo, position);
+          state.pseudos.push([el, pseudo]);
+        }
+      }
+    }
+  };
+  visit(document.body ?? document.documentElement);
+  if (state.pseudos.length && !state.sheet) {
+    state.sheet = document.createElement("style");
+    state.sheet.textContent = ["before", "after"].map((p) =>
+      \`[data-etp-pin-\${p}="fixed"]::\${p} { opacity: 0 !important }
+       [data-etp-pin-\${p}="sticky"]::\${p} { position: relative !important }\`
+    ).join("\\n");
+    (document.head ?? document.documentElement).append(state.sheet);
+  }
+  return state.styles.length + state.pseudos.length;
+})()`;
+
+const ETP_UNPIN_OVERLAYS_EXPRESSION = `(() => {
+  const state = window.__etpPinned;
+  if (!state) return;
+  for (const [el, prop, value, priority] of state.styles) {
+    if (value) el.style.setProperty(prop, value, priority);
+    else el.style.removeProperty(prop);
+  }
+  for (const [el, pseudo] of state.pseudos) {
+    el.removeAttribute("data-etp-pin-" + pseudo);
+  }
+  state.sheet?.remove();
+  window.__etpPinned = undefined;
+})()`;
+
+async function etpEvaluate(
+  firefox3,
+  expression,
+  sandbox,
+  { context = firefox3.getCurrentContextId(), awaitPromise = false } = {}
+) {
+  const result = await firefox3.sendBiDiCommand("script.evaluate", {
+    expression,
+    target: { context, sandbox },
+    awaitPromise,
+  });
+  if (result.type !== "success") {
+    throw new Error(
+      `script failed: ${JSON.stringify(result.exceptionDetails ?? result)}`
+    );
+  }
+  return result.result.value;
+}
+
+const etpSleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+
+// Freezes motion, so loads in different modes and neighbouring slices show
+// the same frame (the approach of Playwright's `animations: "disabled"`).
+// Finite CSS animations and transitions jump to their end, endless ones
+// (spinners, marquees) back to their start, and videos pause on the frame
+// 1s in (the first frame of very short clips). Runs in the page's realm: the
+// animations and media elements are the page's own. Resolves within 3s, as a
+// video that can't seek (not buffered there) must not hold up the capture.
+const ETP_FREEZE_MOTION_EXPRESSION = `(async () => {
+  let animations = 0;
+  for (const animation of document.getAnimations()) {
+    try {
+      const end = animation.effect?.getComputedTiming().endTime;
+      if (Number.isFinite(end)) animation.finish();
+      else animation.cancel();
+      animations++;
+    } catch {}
+  }
+  const videos = [...document.querySelectorAll("video")];
+  const frozen = videos.map((video) => new Promise((resolve) => {
+    video.pause();
+    const at = video.duration > 2 ? 1 : 0;
+    if (video.readyState === 0 || video.currentTime === at) return resolve();
+    video.addEventListener("seeked", resolve, { once: true });
+    video.currentTime = at;
+  }));
+  await Promise.race([
+    Promise.all(frozen),
+    new Promise((resolve) => setTimeout(resolve, 3000)),
+  ]);
+  return JSON.stringify({ animations, videos: videos.length });
+})()`;
+
+// Every browsing context in the selected tab: the page and its frames,
+// including cross-origin iframes (e.g. video embeds).
+function etpContexts(tree) {
+  return tree.flatMap((context) => [
+    context.context,
+    ...etpContexts(context.children ?? []),
+  ]);
+}
+
+// Freezes motion in the page and all its frames; returns the totals. A frame
+// that is gone or can't run scripts is skipped.
+async function etpFreezeMotion(firefox3) {
+  const { contexts } = await firefox3.sendBiDiCommand(
+    "browsingContext.getTree",
+    { root: firefox3.getCurrentContextId() }
+  );
+  const total = { animations: 0, videos: 0 };
+  for (const context of etpContexts(contexts)) {
+    try {
+      const counts = JSON.parse(
+        await etpEvaluate(firefox3, ETP_FREEZE_MOTION_EXPRESSION, undefined, {
+          context,
+          awaitPromise: true,
+        })
+      );
+      total.animations += counts.animations;
+      total.videos += counts.videos;
+    } catch {}
+  }
+  return total;
+}
+
+async function etpScroll(firefox3, statement) {
+  return JSON.parse(
+    await etpEvaluate(firefox3, etpScrollExpression(statement))
+  );
+}
+
+async function etpCaptureViewport(firefox3) {
+  const { data } = await firefox3.sendBiDiCommand(
+    "browsingContext.captureScreenshot",
+    { context: firefox3.getCurrentContextId(), origin: "viewport" }
+  );
+  return data;
+}
+
+// Scrolls to each slice position (`step` px apart) until the bottom or
+// maxHeight, calling `atStop(page)` at each. Also stops when a step doesn't
+// move the page (it can't scroll, e.g. it scrolls an inner container).
+async function etpScrollSteps(firefox3, step, maxHeight, pauseMs, atStop) {
+  let page = await etpScroll(firefox3, "window.scrollTo(0, 0)");
+  await etpSleep(pauseMs);
+  for (;;) {
+    await atStop(page);
+    const bottom = page.y + page.viewport;
+    if (bottom >= page.height || bottom >= maxHeight) {
+      return page;
+    }
+    const next = await etpScroll(
+      firefox3,
+      `window.scrollTo(0, ${page.y + step})`
+    );
+    await etpSleep(pauseMs);
+    if (next.y <= page.y) {
+      return page;
+    }
+    page = next;
+  }
+}
+
+// Stitches the slices in a chrome canvas; see step 4 above. Calls back with
+// the PNG and, per slice after the first, the shift applied and whether its
+// overlap matched.
+const ETP_STITCH_SCRIPT = `
+  const done = arguments[arguments.length - 1];
+  const [top, slices, maxHeight, overlap] = arguments;
+  const XHTML = "http://www.w3.org/1999/xhtml";
+  const load = async (data) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + data;
+    await img.decode();
+    const canvas = document.createElementNS(XHTML, "canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    // One hash per pixel row, to compare overlaps by row.
+    const { data: px } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const rowBytes = canvas.width * 4;
+    const rows = new Int32Array(canvas.height);
+    for (let r = 0; r < canvas.height; r++) {
+      let h = 0x811c9dc5;
+      for (let i = r * rowBytes, end = i + rowBytes; i < end; i++) {
+        h = Math.imul(h ^ px[i], 0x01000193);
+      }
+      rows[r] = h;
+    }
+    return { canvas, rows };
+  };
+  // Share of the rows where \`cur\`, placed \`dy\` rows below the top of
+  // \`prev\`, matches it; null if they overlap by fewer than 16 rows.
+  const matchAt = (prev, cur, dy) => {
+    const n = Math.min(prev.rows.length - dy, cur.rows.length);
+    if (dy < 0 || n < 16) return null;
+    let same = 0;
+    for (let k = 0; k < n; k++) {
+      if (prev.rows[dy + k] === cur.rows[k]) same++;
+    }
+    return same / n;
+  };
+  (async () => {
+    const images = [];
+    for (const slice of slices) {
+      images.push(await load(slice.data));
+    }
+    const topImage = await load(top);
+    // Device pixels per CSS pixel.
+    const scale = images[0].canvas.height / slices[0].viewport;
+    const maxShift = Math.round((overlap * scale) / 2);
+    const placed = [0];
+    const report = [];
+    for (let i = 1; i < images.length; i++) {
+      const expected = Math.round((slices[i].y - slices[i - 1].y) * scale);
+      let best = { shift: 0, match: matchAt(images[i - 1], images[i], expected) ?? 1 };
+      if (best.match < 1) {
+        for (let d = 1; d <= maxShift && best.match < 1; d++) {
+          for (const shift of [-d, d]) {
+            const match = matchAt(images[i - 1], images[i], expected + shift);
+            // Prefer no shift unless another is clearly better: animated
+            // content in the overlap never matches anywhere.
+            if (match !== null && match > best.match + 0.02) {
+              best = { shift, match };
+            }
+          }
+        }
+      }
+      // A partial match (e.g. a leftover overlay in every slice) says
+      // nothing about where the slice belongs.
+      if (best.shift !== 0 && best.match < 0.95) {
+        best = { shift: 0, match: matchAt(images[i - 1], images[i], expected) ?? 1 };
+      }
+      placed.push(placed[i - 1] + expected + best.shift);
+      report.push({ shift: best.shift, match: Math.round(best.match * 1000) / 1000 });
+    }
+    const last = images.length - 1;
+    const canvas = document.createElementNS(XHTML, "canvas");
+    canvas.width = images[0].canvas.width;
+    canvas.height = Math.min(
+      placed[last] + images[last].canvas.height,
+      Math.round(maxHeight * scale)
+    );
+    const ctx = canvas.getContext("2d");
+    images.forEach((image, i) => ctx.drawImage(image.canvas, 0, placed[i]));
+    ctx.drawImage(topImage.canvas, 0, 0);
+    const url = canvas.toDataURL("image/png");
+    return { data: url.slice(url.indexOf(",") + 1), report };
+  })().then(done, (e) => done({ error: String(e) }));
+`;
+
+async function handleScreenshotFullPage(args2) {
+  try {
+    const {
+      saveTo,
+      maxHeight = 15000,
+      overlap = 200,
+      scrollPauseMs = 300,
+    } = args2 || {};
+    if (!saveTo) {
+      throw new Error("saveTo is required");
+    }
+    const { getFirefox: getFirefox2 } = await Promise.resolve().then(
+      () => (init_src(), src_exports)
+    );
+    const firefox3 = await getFirefox2();
+
+    // 1. Load what loads on scroll.
+    const { viewport } = await etpScroll(firefox3, "");
+    if (overlap < 16 || overlap > viewport / 2) {
+      throw new Error(`overlap must be between 16 and ${viewport / 2}`);
+    }
+    await etpScrollSteps(
+      firefox3,
+      viewport,
+      maxHeight,
+      scrollPauseMs,
+      () => {}
+    );
+    await etpScroll(firefox3, "window.scrollTo(0, 0)");
+    // Let sticky headers and scroll-triggered animations settle at the top.
+    await etpSleep(Math.max(scrollPauseMs, 500));
+
+    // 2. The top as the user sees it, with motion frozen.
+    const frozen = await etpFreezeMotion(firefox3);
+    const top = await etpCaptureViewport(firefox3);
+
+    // 3. The slices, without the overlays.
+    const pin = () =>
+      etpEvaluate(firefox3, ETP_PIN_OVERLAYS_EXPRESSION, "etp-stitch");
+    let pinned = await pin();
+    const slices = [];
+    let page;
+    try {
+      page = await etpScrollSteps(
+        firefox3,
+        viewport - overlap,
+        maxHeight,
+        scrollPauseMs,
+        async (at) => {
+          // Scrolling can make more elements fixed, and start animations
+          // and players again.
+          pinned = await pin();
+          const counts = await etpFreezeMotion(firefox3);
+          frozen.animations = Math.max(frozen.animations, counts.animations);
+          frozen.videos = Math.max(frozen.videos, counts.videos);
+          slices.push({ ...at, data: await etpCaptureViewport(firefox3) });
+        }
+      );
+    } finally {
+      await etpEvaluate(firefox3, ETP_UNPIN_OVERLAYS_EXPRESSION, "etp-stitch");
+      await etpScroll(firefox3, "window.scrollTo(0, 0)");
+    }
+
+    // 4. Stitch.
+    const stitched = await etpRunChrome(
+      ETP_STITCH_SCRIPT,
+      { isAsync: true },
+      top,
+      slices,
+      maxHeight,
+      overlap
+    );
+    if (stitched.error) {
+      throw new Error(`Stitching the screenshots failed: ${stitched.error}`);
+    }
+    const saved = await saveScreenshot(stitched.data, saveTo);
+    const shifted = stitched.report.filter((r) => r.shift !== 0);
+    const unmatched = stitched.report
+      .map((r, i) => ({ ...r, slice: i + 1 }))
+      .filter((r) => r.match < 0.9);
+    saved.content[0].text +=
+      ` Stitched from ${slices.length} viewport slices, with ${pinned} fixed or ` +
+      "sticky elements left out after the top viewport, and motion frozen " +
+      `(${frozen.animations} animations, ${frozen.videos} videos).` +
+      (page.height > maxHeight
+        ? ` Captured only the top ${maxHeight}px of the ${page.height}px page.`
+        : "") +
+      (shifted.length
+        ? ` ${shifted.length} slice(s) were realigned because the page moved ` +
+          "while scrolling."
+        : "") +
+      (unmatched.length
+        ? " The overlap of slice(s) " +
+          unmatched
+            .map((r) => `${r.slice} (${Math.round(r.match * 100)}%)`)
+            .join(", ") +
+          " didn't match the previous slice (animated content, or the page " +
+          "changed while scrolling), so the image may be off there."
+        : "");
+    return saved;
+  } catch (error2) {
+    return errorResponse(
+      error2 instanceof Error ? error2 : new Error(String(error2))
+    );
+  }
+}
+
+var screenshotFullPageTool = {
+  name: "screenshot_full_page",
+  description:
+    "Capture the whole page of the selected tab, not just the viewport, as a PNG saved to saveTo. Scrolls through the page first so lazy-loaded content loads, then stitches overlapping viewport screenshots, with fixed and sticky elements shown only at the top. Freezes motion for the capture: CSS animations jump to their end (endless ones to their start) and videos pause 1s in, so the same page gives the same image; the animations are not restored afterwards. Pages taller than maxHeight are captured only down to maxHeight.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      saveTo: {
+        type: "string",
+        description: "File path to save the screenshot to",
+      },
+      maxHeight: {
+        type: "number",
+        description:
+          "How far down to scroll and capture, in CSS pixels (default 15000)",
+      },
+      overlap: {
+        type: "number",
+        description:
+          "How much each slice overlaps the previous one, in CSS pixels (default 200)",
+      },
+      scrollPauseMs: {
+        type: "number",
+        description: "Pause after each scroll step (default 300)",
+      },
+    },
+    required: ["saveTo"],
+  },
+};
+
 var waitForPageLoadTool = {
   name: "wait_for_page_load",
   description:
@@ -574,7 +1041,7 @@ var waitForPageLoadTool = {
 var setEtpModeTool = {
   name: "set_etp_mode",
   description:
-    'Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). Firefox applies all of the category\'s prefs at once; the response lists the ones off their Standard values. Also clears all cookies, site data and caches, so the next load is a first visit (logins and site state are lost). Switching to Strict fails with an error if the tracker lists or the ETP exception list can\'t be downloaded. "strict/easyprivacy" and "strict/easylist+easyprivacy" are Strict, but block with the EasyPrivacy list, or EasyList and EasyPrivacy together (via the content classifier), instead of the tracker lists, fingerprinter and cryptominer lists and the ETP exception list; they wait until the lists are downloaded and blocking, and fail if they aren\'t. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.',
+    'Switch Enhanced Tracking Protection to the Standard or Strict category at runtime (no restart). "off" is Standard with every tracker-blocking classifier feature turned off. Firefox applies all of the category\'s prefs at once; the response lists the ones off their Standard values. Also clears all cookies, site data and caches, so the next load is a first visit (logins and site state are lost). Switching to Strict fails with an error if the tracker lists or the ETP exception list can\'t be downloaded. "strict/easyprivacy" and "strict/easylist+easyprivacy" are Strict, but block with the EasyPrivacy list, or EasyList and EasyPrivacy together (via the content classifier), instead of the tracker lists, fingerprinter and cryptominer lists and the ETP exception list; they wait until the lists are downloaded and blocking, and fail if they aren\'t. Reload the page afterwards. Requires MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1.',
   inputSchema: {
     type: "object",
     properties: {
