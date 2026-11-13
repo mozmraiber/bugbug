@@ -230,6 +230,7 @@ async def run_autowebcompat_etp_compare(
         url=url,
         outcome=verdict.outcome,
         broken_configurations=verdict.broken_configurations,
+        breakage_tags=verdict.breakage_tags,
         summary=verdict.summary,
         blocked_trackers={
             c: capture.blocked_trackers for c, capture in captures.items()

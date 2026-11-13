@@ -93,7 +93,10 @@ you need.
 
 5. **Submit** via `submit_result`: `sites_same` if every difference is variation
    or an expected removal of trackers or ads, otherwise `broken` with every
-   configuration that breaks the site.
+   configuration that breaks the site and tags for the kinds of breakage
+   (e.g. `anti-adblocker`, `content-blocked`, `script-error`). Use the tags
+   listed in the `breakage_tags` description where they fit; add your own
+   short kebab-case tag when none does.
 
 ## Reporting your result
 

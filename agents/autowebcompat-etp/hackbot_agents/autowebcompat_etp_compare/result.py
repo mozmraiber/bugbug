@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 RESULT_SERVER_NAME = "autowebcompat-etp-compare"
 
@@ -66,6 +66,26 @@ class ComparisonVerdict(BaseModel):
         ),
     ]
 
+    breakage_tags: Annotated[
+        list[str],
+        Field(
+            description="""Short kebab-case tags for the kinds of breakage you found, across
+        every broken configuration. Non-empty exactly when `outcome` is `broken`.
+        Pick from these where one fits, and add your own when none does:
+          * anti-adblocker - a wall or message asking to disable an ad blocker
+          * content-blocked - main content (text, articles, listings) missing
+          * script-error - a script the page needs failed, per the console
+          * blank-page - the page is blank or barely rendered
+          * layout-broken - content overlaps, is misplaced or unstyled
+          * images-missing - the site's own images don't load
+          * video-broken - a video player is missing, empty or shows an error
+          * embed-missing - an embedded widget (map, comments, social post) is gone
+          * login-broken - sign-in or account features are missing or fail
+          * checkout-broken - cart, payment or checkout is missing or fails
+          * consent-banner-stuck - a cookie or consent banner can't be dismissed"""
+        ),
+    ] = []
+
     summary: Annotated[
         str,
         Field(
@@ -81,7 +101,17 @@ class ComparisonVerdict(BaseModel):
             raise ValueError(
                 "broken_configurations must be non-empty exactly when outcome is broken"
             )
+        if (self.outcome == "broken") != bool(self.breakage_tags):
+            raise ValueError(
+                "breakage_tags must be non-empty exactly when outcome is broken"
+            )
         return self
+
+    @field_validator("breakage_tags")
+    @classmethod
+    def normalize_breakage_tags(cls, tags: list[str]) -> list[str]:
+        normalized = ("-".join(tag.lower().replace("_", " ").split()) for tag in tags)
+        return list(dict.fromkeys(tag for tag in normalized if tag))
 
 
 class ScreenshotDiff(BaseModel):
@@ -100,6 +130,7 @@ class EtpComparisonResult(BaseModel):
     url: str
     outcome: Outcome
     broken_configurations: list[BlockingConfiguration]
+    breakage_tags: list[str] = []
     summary: str
     # `Blocked trackers` from the content blocking log after each load.
     blocked_trackers: dict[Configuration, int]
