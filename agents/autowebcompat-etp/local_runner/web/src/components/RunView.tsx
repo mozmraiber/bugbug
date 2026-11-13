@@ -2,6 +2,7 @@ import { useSnapshot } from "valtio";
 
 import { store } from "../store";
 import { ActionsForm } from "./ActionsForm";
+import { CompareResultView } from "./CompareResultView";
 import { LogView } from "./LogView";
 import { Progress } from "./Progress";
 import { ResultView } from "./ResultView";
@@ -34,13 +35,17 @@ export function RunView() {
       {run.reviewError && (
         <div className="note err">No result: {run.reviewError}</div>
       )}
-      {run.review && (
-        <>
-          <ResultView />
-          {run.review.result &&
-            run.review.summary.status === "ok" &&
-            run.actions && <ActionsForm />}
-        </>
+      {run.review?.compare_result && run.review.summary.status === "ok" ? (
+        <CompareResultView />
+      ) : (
+        run.review && (
+          <>
+            <ResultView />
+            {run.review.result &&
+              run.review.summary.status === "ok" &&
+              run.actions && <ActionsForm />}
+          </>
+        )
       )}
     </>
   );

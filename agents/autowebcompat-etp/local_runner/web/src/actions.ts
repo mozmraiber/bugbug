@@ -68,11 +68,21 @@ export async function startRun() {
   start.busy = true;
   start.error = null;
   try {
-    const run = await api.startRun({
-      ...start.options,
-      bug_id: start.bugId ? Number(start.bugId) : null,
-      bug_data: start.bugData || null,
-    });
+    const run = await api.startRun(
+      start.agent === "etp_compare"
+        ? {
+            ...start.options,
+            mode: "investigate",
+            agent: "etp_compare",
+            url: start.url.trim(),
+          }
+        : {
+            ...start.options,
+            agent: "etp",
+            bug_id: start.bugId ? Number(start.bugId) : null,
+            bug_data: start.bugData || null,
+          }
+    );
     loadRuns();
     selectRun(run.run_id);
   } catch (err) {

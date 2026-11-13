@@ -10,6 +10,12 @@ export type RunStatus =
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
+/**
+ * `etp` investigates a bug report; `etp_compare` compares a site with and
+ * without tracker blocking.
+ */
+export type AgentName = "etp" | "etp_compare";
+
 /** `retest` reruns an old bug with Firefox's ETP exceptions turned off. */
 export type Mode = "investigate" | "retest";
 
@@ -23,8 +29,10 @@ export interface RunOptions {
 }
 
 export interface RunParams extends Partial<RunOptions> {
+  agent?: AgentName;
   bug_id?: number | null;
   bug_data?: string | null;
+  url?: string | null;
 }
 
 export interface RunInfo {
@@ -94,11 +102,40 @@ export interface EtpResult {
   screenshot_urls: Record<string, string>;
 }
 
+export type CompareConfiguration =
+  | "off"
+  | "strict"
+  | "easyprivacy"
+  | "easylist";
+export type BlockingConfiguration = Exclude<CompareConfiguration, "off">;
+
+export interface ScreenshotDiff {
+  identical: boolean;
+  size: readonly [number, number];
+  reference_size: readonly [number, number];
+  bbox: readonly [number, number, number, number] | null;
+  changed_fraction: number | null;
+}
+
+/** The etp_compare agent's result. */
+export interface CompareResult {
+  url: string;
+  outcome: "sites_same" | "broken" | "site_unavailable";
+  broken_configurations: BlockingConfiguration[];
+  summary: string;
+  blocked_trackers: Partial<Record<CompareConfiguration, number>>;
+  blocked_tracker_origins: Partial<Record<CompareConfiguration, string[]>>;
+  screenshot_diffs: Partial<Record<BlockingConfiguration, ScreenshotDiff>>;
+  llm_used: boolean;
+  screenshot_urls: Record<string, string>;
+  content_blocking_log_url: string | null;
+}
+
 export interface Summary {
   status: "ok" | "error";
   error: string | null;
   findings: {
-    result?: EtpResult;
+    result?: EtpResult | CompareResult;
     num_turns?: number;
     total_cost_usd?: number;
     traceback?: string;
@@ -156,8 +193,12 @@ export interface BugDraft {
 }
 
 export interface Review {
+  agent: AgentName;
   summary: Summary;
+  /** Only for the etp agent. */
   result: EtpResult | null;
+  /** Only for the etp_compare agent. */
+  compare_result: CompareResult | null;
   screenshots: Record<string, string>;
   screenshot_labels: Record<string, string>;
   has_agent_log: boolean;

@@ -4,6 +4,7 @@
 import { proxy } from "valtio";
 
 import type {
+  AgentName,
   Applied,
   BugDraft,
   Config,
@@ -72,7 +73,9 @@ export interface TriageState {
 }
 
 export interface StartState {
+  agent: AgentName;
   bugId: string;
+  url: string;
   bugData: string;
   options: RunOptions;
   busy: boolean;
@@ -84,7 +87,9 @@ export const store = proxy({
   configError: null as string | null,
   runs: [] as RunInfo[],
   start: {
+    agent: "etp",
     bugId: "",
+    url: "",
     bugData: "",
     options: { ...DEFAULT_OPTIONS },
     busy: false,

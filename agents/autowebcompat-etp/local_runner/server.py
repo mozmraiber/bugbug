@@ -36,6 +36,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import requests
 import uvicorn
@@ -52,7 +53,12 @@ AGENT_DIR = HERE.parent
 REPO_ROOT = AGENT_DIR.parent.parent
 COMPOSE_FILE = AGENT_DIR / "compose.yml"
 ENV_FILE = REPO_ROOT / ".env"
-SERVICE = "autowebcompat-etp-agent"
+# The agents the runner can start, by name: their compose.yml service.
+AGENT_SERVICES = {
+    "etp": "autowebcompat-etp-agent",
+    "etp_compare": "autowebcompat-etp-compare-agent",
+}
+Agent = Literal["etp", "etp_compare"]
 
 load_dotenv(ENV_FILE)
 
@@ -78,6 +84,14 @@ SCREENSHOT_LABELS = {
     "easyprivacy": "Strict ETP with the EasyPrivacy list",
     "easylist": "Strict ETP with EasyList and EasyPrivacy",
     "fixed": "Strict ETP with the proposed fix",
+}
+# The etp_compare agent's configurations; it also publishes a diff image of
+# each blocking one against "off" and the screenshots of its own reloads.
+COMPARE_LABELS = {
+    "off": "No tracker blocking",
+    "strict": "Strict ETP",
+    "easyprivacy": "Strict ETP with the EasyPrivacy list",
+    "easylist": "Strict ETP with EasyList and EasyPrivacy",
 }
 
 # How many agent runs execute at once; the rest wait in the queue.
@@ -195,8 +209,11 @@ app = FastAPI(title="autowebcompat-etp local runner")
 
 
 class StartRequest(BaseModel):
+    agent: Agent = "etp"
     bug_id: int | None = None
     bug_data: str | None = None
+    # The site the etp_compare agent compares, instead of a bug.
+    url: str | None = None
     model: str | None = None
     effort: str | None = None
     max_turns: int | None = None
@@ -251,7 +268,7 @@ def compose_cmd(*args: str) -> list[str]:
 def execute(run: Run) -> None:
     params = run.params
     env_args: list[str] = ["-e", f"RUN_ID={run.run_id}"]
-    for name in ("bug_id", "bug_data", "model", "effort", "max_turns", "mode"):
+    for name in ("bug_id", "bug_data", "url", "model", "effort", "max_turns", "mode"):
         if params.get(name) not in (None, ""):
             env_args += ["-e", f"{name.upper()}={params[name]}"]
     if params.get("headless"):
@@ -264,7 +281,7 @@ def execute(run: Run) -> None:
         "--name",
         run.container,
         *env_args,
-        SERVICE,
+        AGENT_SERVICES[params.get("agent") or "etp"],
     )
     shown = [arg if not arg.startswith("BUG_DATA=") else "BUG_DATA=…" for arg in cmd]
     run.add_line(f"$ {' '.join(shown)}")
@@ -277,7 +294,9 @@ def execute(run: Run) -> None:
             stderr=subprocess.STDOUT,
             # compose.yml passes these through from the host environment.
             env={
-                k: v for k, v in os.environ.items() if k not in ("BUG_ID", "BUG_DATA")
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("BUG_ID", "BUG_DATA", "URL")
             },
         )
         assert run.process.stdout is not None
@@ -325,8 +344,15 @@ for _ in range(MAX_PARALLEL):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def run_subject(params: dict[str, Any]) -> str:
+    if params.get("agent") == "etp_compare":
+        host = urlparse(params.get("url") or "").hostname or "site"
+        return "compare-" + re.sub(r"[^a-z0-9.-]", "-", host.lower())
+    return f"bug{params['bug_id']}" if params.get("bug_id") else "data"
+
+
 def enqueue(params: dict[str, Any]) -> Run:
-    subject = f"bug{params['bug_id']}" if params.get("bug_id") else "data"
+    subject = run_subject(params)
     base = run_id = f"etp-{subject}-{datetime.now():%Y%m%d-%H%M%S}"
     suffix = 1
     while run_id in RUNS or (ARTIFACTS_ROOT / run_id).exists():
@@ -351,11 +377,17 @@ def stored_run_info(path: Path) -> dict[str, Any] | None:
     if meta is None:
         # A run started outside the runner; only list it if it's an ETP result.
         result = ((summary or {}).get("findings") or {}).get("result")
-        if not isinstance(result, dict) or "proposed_exceptions" not in result:
+        if not isinstance(result, dict):
+            return None
+        if is_compare_result(result):
+            params = {"agent": "etp_compare", "url": result.get("url")}
+        elif "proposed_exceptions" in result:
+            params = {"bug_id": guess_bug_id(path, result)}
+        else:
             return None
         meta = {
             "run_id": path.name,
-            "params": {"bug_id": guess_bug_id(path, result)},
+            "params": params,
             "status": summary.get("status"),
             "started": path.stat().st_mtime,
             "finished": path.stat().st_mtime,
@@ -543,15 +575,39 @@ def guess_bug_id(path: Path, result: dict[str, Any] | None = None) -> int | None
     return None
 
 
+def is_compare_result(result: dict[str, Any] | None) -> bool:
+    """Whether a result comes from the etp_compare agent."""
+    return isinstance(result, dict) and "screenshot_diffs" in result
+
+
+def tracker_count_label(label: str, count: int | None) -> str:
+    if count is None:
+        return label
+    return f"{label}, {count} blocked tracker{'' if count == 1 else 's'}"
+
+
+def compare_screenshot_labels(result: dict[str, Any]) -> dict[str, str]:
+    counts = result.get("blocked_trackers") or {}
+    labels = {}
+    for name in result.get("screenshot_urls") or {}:
+        kind, _, rest = name.partition("-")
+        if name in COMPARE_LABELS:
+            labels[name] = tracker_count_label(COMPARE_LABELS[name], counts.get(name))
+        elif kind == "diff" and rest in COMPARE_LABELS:
+            labels[name] = f"Changed pixels: {COMPARE_LABELS[rest]} vs no blocking"
+        elif kind == "recheck":
+            labels[name] = f"Agent reload: {rest}"
+    return labels
+
+
 def screenshot_labels(result: dict[str, Any] | None) -> dict[str, str]:
     """The screenshot labels, each with the blocked trackers the agent counted."""
+    if is_compare_result(result):
+        return compare_screenshot_labels(result)
     counts = (result or {}).get("blocked_trackers") or {}
     labels = {}
     for stage, label in SCREENSHOT_LABELS.items():
-        count = counts.get(stage)
-        if count is not None:
-            label += f", {count} blocked tracker{'' if count == 1 else 's'}"
-        labels[stage] = label
+        labels[stage] = tracker_count_label(label, counts.get(stage))
     return labels
 
 
@@ -675,6 +731,15 @@ def whoami() -> dict[str, Any]:
 
 @app.post("/api/runs")
 def start_run(req: StartRequest) -> dict[str, Any]:
+    if req.agent == "etp_compare":
+        url = (req.url or "").strip()
+        if not re.match(r"^https?://[^/\s]+", url):
+            raise HTTPException(400, "the compare agent needs an http(s) URL")
+        if req.bug_id is not None or req.bug_data:
+            raise HTTPException(400, "the compare agent takes a URL, not a bug")
+        return enqueue(req.model_dump() | {"url": url}).info()
+    if req.url:
+        raise HTTPException(400, "the etp agent takes a bug, not a URL")
     if (req.bug_id is None) == (not req.bug_data):
         raise HTTPException(400, "pass exactly one of bug_id or bug_data")
     return enqueue(req.model_dump()).info()
@@ -775,11 +840,33 @@ def review(run_id: str) -> dict[str, Any]:
         for stage, key in ((result or {}).get("screenshot_urls") or {}).items()
         if (path / key).is_file()
     }
+    if is_compare_result(result):
+        # A site comparison has no bug to post to.
+        return {
+            "agent": "etp_compare",
+            "summary": summary,
+            "result": None,
+            "compare_result": result,
+            "screenshots": screenshots,
+            "screenshot_labels": screenshot_labels(result),
+            "has_agent_log": (path / "logs" / "agent.log").is_file(),
+            "applied": None,
+            "draft": {
+                "bug_id": None,
+                "comment": "",
+                "resolution": None,
+                "close": False,
+                "needinfo": False,
+                "attachments": [],
+            },
+        }
     bug_id = guess_bug_id(path, result)
     outcome = draft_outcome_actions(result)
     return {
+        "agent": "etp",
         "summary": summary,
         "result": result,
+        "compare_result": None,
         "screenshots": screenshots,
         "screenshot_labels": screenshot_labels(result),
         "has_agent_log": (path / "logs" / "agent.log").is_file(),

@@ -290,13 +290,16 @@ dialog::backdrop {
   color: var(--accent);
   font-weight: 600;
 }
-table.bugs {
+table.bugs,
+table.configs {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 table.bugs th,
-table.bugs td {
+table.bugs td,
+table.configs th,
+table.configs td {
   text-align: left;
   padding: 5px 6px;
   border-bottom: 1px solid #eee;
@@ -314,7 +317,7 @@ button.wide {
   width: 100%;
   margin-top: 8px;
 }
-.ok {
+.ok:not(.badge) {
   color: var(--ok);
 }
 .err-text {

@@ -8,6 +8,8 @@ interface Props {
   options: RunOptions;
   buildLabel?: string;
   compact?: boolean;
+  /** The retest checkbox, which only the etp agent understands. */
+  showMode?: boolean;
 }
 
 /** Model / effort / max turns / headless / mode / build, shared by both start flows. */
@@ -15,6 +17,7 @@ export function RunOptionsFields({
   options,
   buildLabel = "Rebuild image first",
   compact = false,
+  showMode = true,
 }: Props) {
   const snap = useSnapshot(options, { sync: true });
 
@@ -68,16 +71,18 @@ export function RunOptionsFields({
         />
         Headless Firefox
       </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={snap.mode === "retest"}
-          onChange={(e) =>
-            (options.mode = e.target.checked ? "retest" : "investigate")
-          }
-        />
-        Retest with ETP exceptions disabled
-      </label>
+      {showMode && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={snap.mode === "retest"}
+            onChange={(e) =>
+              (options.mode = e.target.checked ? "retest" : "investigate")
+            }
+          />
+          Retest with ETP exceptions disabled
+        </label>
+      )}
       <label className="check">
         <input
           type="checkbox"
